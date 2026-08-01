@@ -37,10 +37,15 @@ main {
   max-width: 1100px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: auto minmax(360px, 1fr);
+  /* Both tracks are bounded on purpose. minmax(0, …) stops a wide table inside
+     the panel from pushing the column off the page, and the cap on the left
+     column makes the 18 move buttons wrap rather than eat the panel's width —
+     between them, that is what stopped the text running off the edge. */
+  grid-template-columns: minmax(0, 640px) minmax(340px, 1fr);
   gap: 28px;
   align-items: start;
 }
+.col-cube, .col-panel { min-width: 0; }
 
 footer {
   max-width: 1100px;
@@ -84,6 +89,48 @@ footer a { color: var(--accent); }
 }
 .net.paintable .sticker:not(.centre) { cursor: pointer; }
 
+/* ── the same cube, stood up ─────────────────────────────────────────────── */
+
+.views { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.view3d-wrap { display: grid; gap: 4px; justify-items: center; }
+
+.cube3d {
+  perspective: 900px;
+  touch-action: none;                /* dragging turns the cube, not the page */
+  cursor: grab;
+  padding: 36px 26px;                /* a turned cube reaches past its own box */
+}
+.cube3d.dragging { cursor: grabbing; }
+
+.cube3d .scene {
+  width: var(--cube-size);
+  height: var(--cube-size);
+  perspective: 900px;
+}
+.cube3d .cube-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 120ms ease-out;
+}
+.cube3d.dragging .cube-body { transition: none; }
+
+.cube3d .cube-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  background: #0d0f13;
+  border-radius: 4px;
+  backface-visibility: hidden;
+}
+.cube3d .sticker { border: none; border-radius: 3px; }
+.cube3d .sticker.hl { outline: 2px solid #fff; outline-offset: -2px; box-shadow: none; }
+
 /* ── controls ────────────────────────────────────────────────────────────── */
 
 .col-cube { display: grid; gap: 12px; justify-items: start; }
@@ -106,6 +153,8 @@ button.primary { background: var(--accent); color: #10131a; border-color: var(--
 button.toggle.on { border-color: var(--accent); color: var(--accent); }
 
 .palette { display: flex; gap: 6px; }
+/* display: … would otherwise beat the hidden attribute and show these anyway */
+.palette[hidden], .camera[hidden] { display: none; }
 .swatch {
   width: 30px; height: 30px; padding: 0;
   border-radius: 6px;
@@ -134,6 +183,47 @@ input[type=text] {
 .hint, .note { margin: 4px 0 0; color: var(--dim); font-size: 0.85rem; max-width: 62ch; }
 .error { color: #ff8f8f; font-size: 0.9rem; margin: 4px 0 0; }
 
+/* ── reading the cube with the camera ────────────────────────────────────── */
+
+.camera {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  width: min(100%, 420px);
+}
+.cam-title { margin: 0; font-weight: 700; }
+.camera .hint { margin: 0; }
+.cam-progress { margin: 0; color: var(--dim); font-size: 0.85rem; }
+
+/* Square box + object-fit: cover, so what is on screen is exactly the centred
+   square of the frame — the same square the colours are read from. */
+.cam-stage {
+  position: relative;
+  width: min(100%, 320px);
+  aspect-ratio: 1 / 1;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.cam-stage video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-stage.off { display: none; }
+
+.cam-guide {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  pointer-events: none;
+}
+.cam-cell { border: 1px solid rgba(255, 255, 255, 0.85); }
+
 /* ── the panel ───────────────────────────────────────────────────────────── */
 
 .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
@@ -145,9 +235,32 @@ input[type=text] {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 16px 18px;
+  overflow-wrap: anywhere;
 }
 .panel h2 { margin-top: 8px; }
 .advice { margin: 6px 0 0; max-width: 64ch; }
+
+/* the one line that says what this step is for */
+.goal {
+  margin: 2px 0 10px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.technique {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: rgba(110, 168, 254, 0.07);
+}
+.technique-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.technique .advice { margin-top: 2px; font-size: 0.92rem; }
+
+details { margin-top: 16px; }
+summary { cursor: pointer; color: var(--dim); font-size: 0.9rem; }
 
 .progress { display: flex; gap: 8px; flex-wrap: wrap; }
 .stage {
@@ -173,6 +286,7 @@ input[type=text] {
 
 table.grid {
   width: 100%;
+  table-layout: fixed;          /* a 14-move algorithm wraps instead of widening */
   border-collapse: collapse;
   font-size: 0.87rem;
   margin-top: 4px;
@@ -182,11 +296,12 @@ table.grid th, table.grid td {
   padding: 6px 8px;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
-table.grid th { color: var(--dim); font-weight: 600; white-space: nowrap; }
+table.grid th { color: var(--dim); font-weight: 600; }
 table.grid tr.target td { background: rgba(110, 168, 254, 0.12); }
 table.grid tr.muted td { color: var(--dim); }
-td.alg { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+td.alg { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .jp { color: var(--dim); font-size: 0.8rem; }
 
 .alg-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
