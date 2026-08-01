@@ -1,8 +1,8 @@
 """ブラウザでの動作確認（Playwright）。
 
-    python test/ui_smoke.py
+    python test/ui_smoke.py [URL]      既定はローカルの index.html
 
-index.html を file:// で開き、実際にクリックして次を確かめる:
+ページを開いて実際にクリックし、次を確かめる（公開後は URL を渡して本番も確認する）:
   - コンソールエラーが出ない / 54 マスが描画される
   - スクランブル後に CFOP パネルがフェーズを答える
   - 最短手順を求めて最後まで進めると、本当に完成状態になる
@@ -14,7 +14,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-URL = (ROOT / "index.html").as_uri()
+URL = sys.argv[1] if len(sys.argv) > 1 else (ROOT / "index.html").as_uri()
 
 failures = []
 
