@@ -16,12 +16,14 @@ class Cube {
 
   _solvedState() {
     return {
-      U: Array(9).fill('W'),
-      D: Array(9).fill('Y'),
+      // 白を下、緑を手前に持った標準の配置。CFOP はクロスを底面に作るので、
+      // この向きだと画面と手元のキューブが同じ「白クロス・上面は黄色」になる。
+      U: Array(9).fill('Y'),
+      D: Array(9).fill('W'),
       F: Array(9).fill('G'),
       B: Array(9).fill('B'),
-      L: Array(9).fill('O'),
-      R: Array(9).fill('R'),
+      L: Array(9).fill('R'),
+      R: Array(9).fill('O'),
     };
   }
 
