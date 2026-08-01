@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cube Trainer — 今どのフェーズで、次に何をするか</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header>
+  <h1>Cube Trainer</h1>
+  <p class="lead">
+    手元のキューブの状態を入れると、<strong>いま CFOP のどの段階にいて、次に何をすればいいか</strong>を、
+    テクニックの名前つきで示します。最短手順（2 フェーズ法・平均 21 手）にも切り替えられます。
+  </p>
+</header>
+
+<main>
+  <section class="col-cube">
+    <div id="net" class="net"></div>
+
+    <div class="row" id="paint-row">
+      <button id="edit-toggle" class="toggle">色を塗る</button>
+      <div id="palette" class="palette" hidden></div>
+    </div>
+    <p id="paint-hint" class="hint" hidden>塗りたい色を選んでから、展開図のマスをクリックしてください。中心の色は面の基準なので変更できません。</p>
+
+    <p id="status" class="status"></p>
+
+    <div class="row">
+      <button id="scramble">スクランブル</button>
+      <button id="reset">完成状態に戻す</button>
+      <button id="undo">1 つ戻す</button>
+    </div>
+
+    <div id="moves" class="moves"></div>
+
+    <div class="row">
+      <input id="seq" type="text" placeholder="R U R' U' のように入力" autocomplete="off">
+      <button id="apply-seq">手順を適用</button>
+    </div>
+    <p id="seq-error" class="error" hidden></p>
+  </section>
+
+  <section class="col-panel">
+    <div class="tabs">
+      <button id="tab-cfop" class="tab active">CFOP で学ぶ</button>
+      <button id="tab-shortest" class="tab">最短手順</button>
+    </div>
+    <div id="panel" class="panel"></div>
+  </section>
+</main>
+
+<footer>
+  <p>
+    状態モデルと 2 フェーズ法ソルバーは
+    <a href="https://github.com/takumayellow/rubik-solver">takumayellow/rubik-solver</a> から。
+    手順は公知のアルゴリズムを自分で書き起こしたものです。
+  </p>
+</footer>
+
+<script src="js/cube.js"></script>
+<script src="js/cubie.js"></script>
+<script src="js/two-phase.js"></script>
+<script src="js/cfop.js"></script>
+<script src="js/glossary.js"></script>
+<script src="js/net.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
