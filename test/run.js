@@ -14,6 +14,7 @@
 //      ＋ 技名が実際の効果と一致しているか（A パームなら角 3 巡、U パームなら辺 3 巡）
 //   8. Step: 出てくる案内どおりに回すと、スクランブルが完成まで到達するか
 //   9. Scan: 撮った色（照明のかぶり・ノイズ込み）から元の状態を復元できるか
+//  10. MoveWords: 手の言い方が、白を下・緑を手前に持ったときの実際の動きと一致するか
 
 'use strict';
 const fs = require('fs');
@@ -22,7 +23,7 @@ const path = require('path');
 // ブラウザ用のファイルをそのまま読み込む（ビルド無しを保つため）
 global.window = global;
 for (const f of ['cube.js', 'cubie.js', 'two-phase.js', 'cfop.js', 'glossary.js',
-                 'search.js', 'algs.js', 'step.js', 'scan.js']) {
+                 'search.js', 'algs.js', 'step.js', 'scan.js', 'move-words.js']) {
   // eslint-disable-next-line no-eval
   eval(fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8'));
 }
@@ -278,7 +279,7 @@ for (const e of Algs.OLL) {
 
 // ── 8. 案内どおり回すと完成するか ────────────────────────────────────────────
 const runs = Math.max(3, Math.round(trials / 40));
-let stepFail = 0, stepMoves = 0, stepCount = 0, worstMs = 0;
+let stepFail = 0, stepMoves = 0, stepCount = 0, worstMs = 0, noWhere = 0;
 for (let i = 0; i < runs; i++) {
   const c = new Cube();
   c.scramble(25);
@@ -288,6 +289,7 @@ for (let i = 0; i < runs; i++) {
     const job = Step.next(c.getState());
     worstMs = Math.max(worstMs, Date.now() - t0);
     if (job.stage === 'solved') break;
+    if (!job.where) noWhere++;
     if (job.stuck || !job.moves.length) { stepFail++; break; }
     c.applySequence(job.moves);
     stepMoves += job.moves.length;
@@ -296,8 +298,26 @@ for (let i = 0; i < runs; i++) {
   }
 }
 check(`案内どおりに回すと完成する × ${runs}`, stepFail === 0, `${stepFail} 件が到達せず`);
+check('どの案内にも「場所」のヒントがある', noWhere === 0, `${noWhere} 件が空`);
 console.log(`      1 回の解に ${(stepCount / runs).toFixed(1)} ステップ・` +
             `${(stepMoves / runs).toFixed(1)} 手 / 1 ステップの探索は最長 ${worstMs} ms`);
+
+// ── 10. 手の言い方 ──────────────────────────────────────────────────────────
+// 「上の面を左へ」と書いたら、本当に手前の上段が左へ行くか。言葉が逆なら、
+// キューブを初めて持つ人は案内どおりに回して崩すことになる。
+check('すべての手に言い方がある', MOVES.every(m => MoveWords.describe(m) !== ''));
+check('手でないものには言い方を返さない',
+      MoveWords.describe('toString') === '' && MoveWords.describe('X') === '');
+check('逆手で元に戻る', MOVES.every(m => after([m, MoveWords.inverse(m)]).isSolved()));
+const sees = (move, face, index, colour) => after([move]).getState()[face][index] === colour;
+check('U: 手前の上段が左へ（右面の橙が手前に来る）', sees('U', 'F', 0, 'O'));
+check("U': 手前の上段が右へ（左面の赤が手前に来る）", sees("U'", 'F', 0, 'R'));
+check('D: 手前の下段が右へ（手前の緑が右面に行く）', sees('D', 'R', 6, 'G'));
+check('R: 右列が奥へ（手前の緑が上面に上がる）', sees('R', 'U', 2, 'G'));
+check("R': 右列が手前へ（上面の黄が手前に来る）", sees("R'", 'F', 2, 'Y'));
+check('L: 左列が手前へ（上面の黄が手前に来る）', sees('L', 'F', 0, 'Y'));
+check('F: 時計回り（上面の黄が右面に行く）', sees('F', 'R', 0, 'Y'));
+check('B: 正面から見て反時計回り（上面の黄が左面に行く）', sees('B', 'L', 0, 'Y'));
 
 console.log(`\n2 フェーズ法: 平均 ${(tpLen / (trials - tpFail)).toFixed(1)} 手 / 最大 ${tpMax} 手 / ` +
             `${((Date.now() - tpStart) / trials).toFixed(1)} ms per solve`);

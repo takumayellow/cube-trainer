@@ -95,14 +95,7 @@
 
     /** One face captured from any square-croppable source. */
     function take(source, width, height) {
-      const side = Math.min(width, height);
-      const canvas = document.createElement('canvas');
-      canvas.width = side;
-      canvas.height = side;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, side, side);
-
-      shots.push(Scan.sampleFace(ctx, Scan.frameBox(side, side, FILL)));
+      shots.push(sampleSquare(source, width, height, FILL));
       clearError();
       if (shots.length === faces.length) finish();
       else draw();
@@ -143,33 +136,22 @@
       const file = pick.files && pick.files[0];
       pick.value = '';                       // same file twice must still fire
       if (!file) return;
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        take(img, img.naturalWidth, img.naturalHeight);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        fail('画像を読み込めませんでした。別のファイルを試してください。');
-      };
-      img.src = url;
+      loadImage(file).then(
+        img => take(img, img.naturalWidth, img.naturalHeight),
+        () => fail('画像を読み込めませんでした。別のファイルを試してください。'));
     });
 
     // ── the camera itself ───────────────────────────────────────────────────
 
     async function start() {
       draw();
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (!canStream()) {
         stage.classList.add('off');
         fail('この環境ではカメラを使えません。「写真を選ぶ」で 1 面ずつ読み込めます。');
         return;
       }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 1280 } },
-          audio: false,
-        });
+        stream = await openStream();
       } catch (e) {
         stage.classList.add('off');
         fail(`カメラを使えませんでした（${e.name}）。「写真を選ぶ」で 1 面ずつ読み込めます。`);
@@ -196,5 +178,45 @@
     return { start, stop };
   }
 
-  window.Camera = { create, FILL };
+  // ── pieces the phone app's scanner shares ───────────────────────────────
+
+  /**
+   * Sample the centred square of `source` — the square the preview shows — at
+   * the guide drawn over it.
+   * @param {CanvasImageSource} source  a playing <video> or a loaded <img>
+   * @param {number} width   the source's own pixel size
+   * @param {number} height
+   * @param {number} fill    guide side as a fraction of the square
+   * @returns {Array} nine RGB samples, in sticker order
+   */
+  function sampleSquare(source, width, height, fill) {
+    const side = Math.min(width, height);
+    const canvas = document.createElement('canvas');
+    canvas.width = side;
+    canvas.height = side;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, side, side);
+    return Scan.sampleFace(ctx, Scan.frameBox(side, side, fill));
+  }
+
+  const canStream = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+  /** The rear camera, square-ish and sharp enough to tell orange from red. */
+  const openStream = () => navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 1280 } },
+    audio: false,
+  });
+
+  /** A picked image file, decoded. Rejects when it is not an image after all. */
+  function loadImage(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('not an image')); };
+      img.src = url;
+    });
+  }
+
+  window.Camera = { create, FILL, sampleSquare, canStream, openStream, loadImage };
 })();

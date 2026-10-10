@@ -32,6 +32,8 @@ h3 { font-size: 1rem; margin: 18px 0 6px; color: var(--dim); }
 
 header { max-width: 1100px; margin: 0 auto 20px; }
 .lead { margin: 0; color: var(--dim); max-width: 70ch; }
+.lead-more { margin-top: 6px; }
+.move-words .move { margin-right: 4px; }
 
 main {
   max-width: 1100px;
@@ -55,7 +57,7 @@ footer {
   border-top: 1px solid var(--line);
   padding-top: 12px;
 }
-footer a { color: var(--accent); }
+footer a, .lead a { color: var(--accent); }
 
 /* ── the unfolded cube ───────────────────────────────────────────────────── */
 
