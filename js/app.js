@@ -160,6 +160,7 @@
     } else if (job.moves.length) {
       panel.appendChild(moveChips(job.moves, 0));
       panel.appendChild(jobControls(job));
+      panel.appendChild(moveWords(job.moves[0]));
       if (job.why) panel.appendChild(el('p', 'advice', job.why));
       if (job.partial) {
         panel.appendChild(el('p', 'note',
@@ -259,6 +260,7 @@
     panel.appendChild(el('h3', null, `${solution.length} 手（${step} / ${solution.length} まで実行）`));
     panel.appendChild(moveChips(solution, step));
     panel.appendChild(stepControls());
+    if (step < solution.length) panel.appendChild(moveWords(solution[step]));
 
     if (report && report.current !== 'solved') {
       panel.appendChild(el('p', 'note',
@@ -293,6 +295,14 @@
       list.appendChild(el('span', 'move' + (i < at ? ' past' : i === at ? ' next' : ''), m));
     });
     return list;
+  }
+
+  /** The next move in words, for whoever does not read R' yet. */
+  function moveWords(move) {
+    const p = el('p', 'note move-words');
+    p.appendChild(el('span', 'move next', move));
+    p.appendChild(document.createTextNode(` ${MoveWords.describe(move)}（白を下・緑を手前）`));
+    return p;
   }
 
   function stepControls() {
@@ -341,6 +351,7 @@
       for (const suffix of ['', "'", '2']) {
         const m = face + suffix;
         const b = el('button', 'move-btn', m);
+        b.title = MoveWords.describe(m);
         b.onclick = () => mutate(() => cube.applyMove(m));
         group.appendChild(b);
       }

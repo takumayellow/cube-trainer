@@ -88,6 +88,7 @@
       stage: 'cross',
       title: `クロス（${before + 1} 本目 / ${target.label}）`,
       goal: `${target.label}の辺をまず上段へ出す`,
+      where: `底面・${target.label}の辺`,
       moves: lift.moves || [],
       why: `${target.label}の辺は${edgePlace(at, target.edge)}。`
          + 'いきなり入れようとすると他の辺を崩すので、まず上段へ出してから入れる。',
@@ -114,6 +115,7 @@
       title: `クロス（${nth} / ${labels}）`,
       goal: gained.length === 1 ? `${labels}の辺を底面に入れる`
         : `${labels}の辺を ${gained.length} 本まとめて底面に入れる`,
+      where: `底面・${labels}の辺`,
       moves,
       why: `${places}。`
          + `底面の色と側面の色が両方そろって初めて 1 本完成。あと ${rest} 本。`,
@@ -171,6 +173,7 @@
       stage: 'f2l',
       title: `F2L（${solvedSlots.length + 1} 組目 / ${slot.label}スロット）`,
       goal: `${slot.label}の角と辺を上段へ取り出す`,
+      where: `${slot.label}のスロット（下 2 段の角）`,
       moves: lift.moves || [],
       why: pairWhy(pieces, slot) + '上段に 2 つそろえてから、ペアを組んで 1 回で入れる。',
       partial: true,
@@ -184,6 +187,7 @@
       stage: 'f2l',
       title: `F2L（${doneCount + 1} 組目 / ${slot.label}スロット）`,
       goal: `${slot.label}の角と辺を 2 個同時に入れる`,
+      where: `${slot.label}のスロット（下 2 段の角）`,
       moves,
       why: pairWhy(pieces, slot)
          + '角と辺を上段でペアにしてから落とすと、2 個が 1 回で入る。',
@@ -209,6 +213,7 @@
 
   // ── OLL / PLL ─────────────────────────────────────────────────────────────
 
+  const WHERE = { oll: '上面（黄色の面）', pll: '最後の層（上段の側面）' };
   const U_FACE = () => Array.from({ length: 9 }, (_, i) => ({ face: 'U', index: i }));
 
   function algJob(pieces, stage) {
@@ -218,6 +223,7 @@
       return {
         stage,
         title: stage === 'oll' ? 'OLL（上面をそろえる）' : 'PLL（上段を入れ替える）',
+        where: WHERE[stage],
         goal: '手持ちの手順では届かない形',
         moves: [],
         why: '覚えている手順の組み合わせでは届かない形。上段を適当に 1 手順まわして形を変える。',
@@ -228,6 +234,7 @@
     return {
       stage,
       title: stage === 'oll' ? 'OLL（上面をそろえる）' : 'PLL（上段を入れ替える）',
+      where: WHERE[stage],
       goal: step.goal,
       moves: step.moves,
       why: step.when,
@@ -245,7 +252,8 @@
    * What to do now, for this cube.
    * @returns {object} `moves` is the sequence to turn; `partial` marks a job
    *   that only sets up the real one, so the panel can say so instead of
-   *   pretending the stage is about to close.
+   *   pretending the stage is about to close; `where` names the part of the
+   *   cube the job is about, for a hint that stops short of the pieces.
    */
   function next(state) {
     const pieces = Cubie.fromFacelets(state);
