@@ -29,5 +29,46 @@
   /** The move that undoes `move`. */
   const inverse = move => (move.endsWith("'") ? move[0] : move.endsWith('2') ? move : move + "'");
 
-  window.MoveWords = { describe, inverse };
+  const MAX_MOVES = 400;        // a pasted essay is a typo, not a sequence
+  const MAX_CHARS = MAX_MOVES * 4;   // "R2' " is the longest a move gets
+
+  /**
+   * Typed moves, with or without spaces ("R U R' U'" or "RUR'U'").
+   * Returns { moves } or { error } — the error names what could not be read.
+   */
+  function parse(raw) {
+    const text = String(raw).replace(/[’′]/g, "'").trim();
+    if (text.length > MAX_CHARS) {
+      return { error: `手順が長すぎます。${MAX_MOVES} 手までにしてください。` };
+    }
+    const moves = [];
+    const unknown = [];
+    const token = /([UDLRFB])(2'|'2|2|')?|\S/g;
+    let m;
+    while ((m = token.exec(text)) !== null) {
+      if (!m[1]) unknown.push(m[0]);
+      else moves.push(m[1] + (m[2] ? (m[2].includes('2') ? '2' : "'") : ''));
+    }
+    if (unknown.length) {
+      return { error: `使えない記号があります: ${[...new Set(unknown)].join(' ')}（U D L R F B に ' か 2 を付けた形）` };
+    }
+    if (moves.length > MAX_MOVES) {
+      return { error: `手順が長すぎます（${moves.length} 手）。${MAX_MOVES} 手までにしてください。` };
+    }
+    return { moves };
+  }
+
+  /**
+   * The move a key press asks for: the face letter turns it clockwise, with
+   * Shift the other way. Shortcuts (Ctrl, Alt, ⌘), IME input and a held-down
+   * key's repeats turn nothing.
+   */
+  function fromKey(ev) {
+    if (ev.repeat || ev.ctrlKey || ev.altKey || ev.metaKey || ev.isComposing) return null;
+    const k = typeof ev.key === 'string' && ev.key.length === 1 ? ev.key.toUpperCase() : '';
+    if (!k || !'UDLRFB'.includes(k)) return null;
+    return ev.shiftKey ? k + "'" : k;
+  }
+
+  window.MoveWords = { describe, inverse, parse, fromKey, MAX_MOVES };
 })();

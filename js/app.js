@@ -20,8 +20,6 @@
   const MAX_UNDO = 100;
   const SCRAMBLE_LEN = 25;
   const PER_FACE = 9;
-  const MAX_SEQ = 400;          // a pasted essay is a typo, not a sequence
-
   // Where a sticker sits on its face, for talking about a doubtful colour.
   const SPOT = ['左上', '上', '右上', '左', '中央', '右', '左下', '下', '右下'];
 
@@ -360,24 +358,26 @@
   }
 
   function applySequence() {
-    const raw = $('seq').value.trim();
     const err = $('seq-error');
     err.hidden = true;
-    if (!raw) return;
-    const moves = raw.replace(/’/g, "'").split(/\s+/);
-    if (moves.length > MAX_SEQ) {
-      err.textContent = `手順が長すぎます（${moves.length} 手）。${MAX_SEQ} 手までにしてください。`;
+    const { moves, error } = MoveWords.parse($('seq').value);
+    if (error) {
+      err.textContent = error;
       err.hidden = false;
       return;
     }
-    const unknown = moves.filter(m => !Object.prototype.hasOwnProperty.call(Cube._MOVES, m));
-    if (unknown.length) {
-      err.textContent = `使えない記号があります: ${unknown.join(' ')}（U D L R F B に ' か 2 を付けた形）`;
-      err.hidden = false;
-      return;
-    }
+    if (!moves.length) return;
     mutate(() => cube.applySequence(moves));
     $('seq').value = '';
+  }
+
+  /** A face letter turns that face, Shift+letter the other way — while no field has the keys. */
+  function onKey(ev) {
+    if (ev.target.closest && ev.target.closest('input, textarea, select')) return;
+    const move = MoveWords.fromKey(ev);
+    if (!move) return;
+    ev.preventDefault();
+    mutate(() => cube.applyMove(move));
   }
 
   /** Painting mode, from anywhere — the scanner turns it on when it is unsure. */
@@ -452,6 +452,7 @@
   $('undo').onclick = undo;
   $('apply-seq').onclick = applySequence;
   $('seq').onkeydown = (ev) => { if (ev.key === 'Enter') applySequence(); };
+  document.addEventListener('keydown', onKey);
   $('tab-cfop').onclick = () => setMode('cfop');
   $('tab-shortest').onclick = () => setMode('shortest');
 

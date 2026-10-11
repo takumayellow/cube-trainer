@@ -184,6 +184,15 @@ input[type=text] {
 .status.ng { color: #ff8f8f; }
 .hint, .note { margin: 4px 0 0; color: var(--dim); font-size: 0.85rem; max-width: 62ch; }
 .error { color: #ff8f8f; font-size: 0.9rem; margin: 4px 0 0; }
+kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+/* Only a device with a keyboard can use the keys. */
+@media (hover: none) and (pointer: coarse) { .kbd-hint { display: none; } }
 
 /* ── reading the cube with the camera ────────────────────────────────────── */
 

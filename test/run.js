@@ -15,6 +15,7 @@
 //   8. Step: 出てくる案内どおりに回すと、スクランブルが完成まで到達するか
 //   9. Scan: 撮った色（照明のかぶり・ノイズ込み）から元の状態を復元できるか
 //  10. MoveWords: 手の言い方が、白を下・緑を手前に持ったときの実際の動きと一致するか
+//  11. MoveWords: 打ち込んだ手順とキー操作を正しい手に読むか
 
 'use strict';
 const fs = require('fs');
@@ -318,6 +319,29 @@ check("R': 右列が手前へ（上面の黄が手前に来る）", sees("R'", '
 check('L: 左列が手前へ（上面の黄が手前に来る）', sees('L', 'F', 0, 'Y'));
 check('F: 時計回り（上面の黄が右面に行く）', sees('F', 'R', 0, 'Y'));
 check('B: 正面から見て反時計回り（上面の黄が左面に行く）', sees('B', 'L', 0, 'Y'));
+
+// ── 11. 手順の入力とキー操作 ────────────────────────────────────────────────
+// 打ち込んだ手順を読み違えると、画面のキューブが手元と違う状態になる。
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+check('空白区切りの手順を読む', same(MoveWords.parse("R U R' U'").moves, ['R', 'U', "R'", "U'"]));
+check('空白なしでも読む', same(MoveWords.parse("RUR'U'F2").moves, ['R', 'U', "R'", "U'", 'F2']));
+check('全角の ’ と R2\' を受け付ける', same(MoveWords.parse('R’ U2\'').moves, ["R'", 'U2']));
+check('空の入力は 0 手', same(MoveWords.parse('  ').moves, []));
+check('使えない記号は名指しで拒否する',
+      !MoveWords.parse('R x U').moves && MoveWords.parse('R x U').error.includes('x'));
+check('小文字（2 層回し）は拒否する', !MoveWords.parse('r U').moves);
+check('長すぎる手順は拒否する', !MoveWords.parse('R '.repeat(MoveWords.MAX_MOVES + 1)).moves);
+check('上限ぎりぎりの手順は通す', MoveWords.parse("R2' ".repeat(MoveWords.MAX_MOVES)).moves.length === MoveWords.MAX_MOVES);
+check('巨大な貼り付けは読まずに拒否する', !!MoveWords.parse('R'.repeat(1e6)).error);
+const key = (k, mods) => MoveWords.fromKey(Object.assign({ key: k }, mods));
+check('キー: 文字で時計回り', key('r') === 'R' && key('b') === 'B');
+check("キー: Shift で逆回し", key('R', { shiftKey: true }) === "R'");
+check('キー: CapsLock の大文字は時計回り', key('U') === 'U');
+check('キー: Ctrl / Alt / ⌘ 付きと変換中は回さない',
+      key('r', { ctrlKey: true }) === null && key('r', { altKey: true }) === null &&
+      key('r', { metaKey: true }) === null && key('r', { isComposing: true }) === null);
+check('キー: 面以外の文字は回さない', key('x') === null && key('Enter') === null);
+check('キー: 押しっぱなしのリピートでは回さない', key('r', { repeat: true }) === null);
 
 console.log(`\n2 フェーズ法: 平均 ${(tpLen / (trials - tpFail)).toFixed(1)} 手 / 最大 ${tpMax} 手 / ` +
             `${((Date.now() - tpStart) / trials).toFixed(1)} ms per solve`);

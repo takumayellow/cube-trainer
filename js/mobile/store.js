@@ -109,6 +109,9 @@
     /** Turn one face. */
     apply(move, source) { change(() => cube.applyMove(move), source); },
 
+    /** Turn several faces as one change: one undo step, one save. */
+    applyAll(moves, source) { change(() => cube.applySequence(moves), source); },
+
     /** Put the cube in a given state within the same solve (stepping through a solution). */
     setState(state, source) { change(() => cube.setState(state), source); },
 
