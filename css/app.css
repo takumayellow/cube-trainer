@@ -469,3 +469,20 @@ button.chip { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* ── typed moves ────────────────────────────────────────────────────────── */
+
+.controls { display: grid; gap: 8px; }
+.cmd { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.cmd input {
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--fg);
+  font: 15px var(--mono);
+}
+/* Only a device with a keyboard can use the keys. */
+@media (hover: none) and (pointer: coarse) { .kbd-hint { display: none; } }

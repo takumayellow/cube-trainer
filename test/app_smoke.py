@@ -8,6 +8,7 @@
   - 使ったテクニックが「辞典」に残る
   - 「最短」を自動再生すると完成する
   - 「画面で回す」で 3D キューブとムーブパッドが出て、押した手が反映される
+  - 「画面で回す」では手順の入力とキーボード（R / Shift+R）でも回せる
   - 写真 6 枚から読み取った状態がそのまま判定に渡る
   - コンソールエラーが出ない
 """
@@ -188,7 +189,47 @@ with sync_playwright() as p:
     )
     check("3D キューブが今の状態を映す", shown == after)
     check("次の一手 390px ではみ出さない", no_overflow(page, 390))
+
+    # 手順の入力とキーボード
+    turned = "(a) => { const c = new Cube(); c.setState(a[0]); c.applySequence(a[1]); return c.getState(); }"
+    before = store_state(page)
+    page.fill(".cmd input", "R U R' U'")
+    page.keyboard.press("Enter")
+    coach_settled(page)
+    check("打ち込んだ手順で回る",
+          store_state(page) == page.evaluate(turned, [before, ["R", "U", "R'", "U'"]]))
+    check("回したあとも入力欄に打ち続けられる",
+          page.evaluate("() => document.activeElement.matches('.cmd input')")
+          and page.input_value(".cmd input") == "")
+    before = store_state(page)
+    page.fill(".cmd input", "R x")
+    page.keyboard.press("Enter")
+    check("読めない手順は理由を出して回さない",
+          page.locator(".controls .error").count() == 1 and store_state(page) == before)
+    page.fill(".cmd input", "")
+    page.evaluate("() => document.activeElement.blur()")
+    page.keyboard.press("f")
+    check("F キーで F が回る", store_state(page) == page.evaluate(turned, [before, ["F"]]))
+    check("パッドやキーで回すと前のエラーは消える", page.locator(".controls .error").count() == 0)
+    page.keyboard.press("Shift+F")
+    check("Shift+F で戻る", store_state(page) == before)
+    coach_settled(page)
+    guided = page.locator(".pad .next").first.get_attribute("data-move") if page.locator(".pad .next").count() else None
+    seq = ["U" if guided != "U" else "D", "R", "F2", "L'"]
+    before = store_state(page)
+    page.fill(".cmd input", " ".join(seq))
+    page.keyboard.press("Enter")
+    coach_settled(page)
+    check("案内から外れた手順もそのとおりに回る", store_state(page) == page.evaluate(turned, [before, seq]))
+    page.get_by_role("button", name="1手戻す").click()
+    check("打ち込んだ手順は 1 回で戻せる", store_state(page) == before)
+    coach_settled(page)
+    page.set_viewport_size({"width": 360, "height": 740})
+    check("入力欄つきでも 360px ではみ出さない", no_overflow(page, 360))
+    page.set_viewport_size({"width": 390, "height": 844})
     page.locator('[data-mode="real"]').click()
+    page.keyboard.press("f")
+    check("実物で回すときはキーで回さない", store_state(page) == before)
 
     # ── 読み取り: 写真 6 枚 → 確認 → 判定 ───────────────────────────────────
     target = page.evaluate("() => { const c = new Cube(); c.scramble(25); return c.getState(); }")

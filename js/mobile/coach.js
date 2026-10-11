@@ -14,6 +14,7 @@
  * Without a real cube, 「画面で回す」 swaps the net for the 3D cube and adds a
  * move pad. Pressing the move the job asks for counts as doing it; any other
  * move changes the cube, and the job is worked out again for what is there.
+ * Typed moves ("R U R' U'") and the keyboard (R, Shift+R) go the same way.
  *
  * Depends on: store.js, ui.js, step.js, cfop.js, glossary.js, cube3d.js, move-words.js
  */
@@ -39,6 +40,8 @@
   let timer = null;
   let own = false;             // inside a change this tab made itself
   let sim = null;              // { box, view } — the 3D cube, kept so its angle survives redraws
+  let typed = '';              // the move field, kept across redraws
+  let typedError = null;
 
   // ── judging ───────────────────────────────────────────────────────────────
 
@@ -115,14 +118,42 @@
 
   /** A pad press. The asked-for move is the job progressing; anything else is a new cube. */
   function turn(move) {
+    typedError = null;
     if (job && !job.stuck && !finished() && job.moves[pos] === move) advance();
     else Store.apply(move, 'pad');
+  }
+
+  /**
+   * Typed moves. Those that follow the guide step it on; from the first that
+   * departs, the rest make a new cube in one change and are judged once.
+   */
+  function runTyped() {
+    const { moves, error } = MoveWords.parse(typed);
+    typedError = error || null;
+    if (error || !moves.length) { draw(); return; }
+    typed = '';
+    let i = 0;
+    while (i < moves.length && job && !job.stuck && !finished() && job.moves[pos] === moves[i]) {
+      advance();
+      i += 1;
+    }
+    if (i < moves.length) Store.applyAll(moves.slice(i), 'pad');
   }
 
   // ── drawing ───────────────────────────────────────────────────────────────
 
   function draw() {
     if (!root) return;
+    const old = document.activeElement;
+    const typing = old && old.matches('.cmd input') && root.contains(old);
+    const caret = typing && old.value === typed ? [old.selectionStart, old.selectionEnd] : [typed.length, typed.length];
+    paint();
+    // Redrawing builds a new field; keep the keys (and the caret) going to it.
+    const field = typing && root.querySelector('.cmd input');
+    if (field) { field.focus(); field.setSelectionRange(caret[0], caret[1]); }
+  }
+
+  function paint() {
     const prefs = Store.prefs();
     const state = Store.state;
     root.textContent = '';
@@ -150,13 +181,15 @@
       root.appendChild(el('p', 'phase-label', '判定中'));
       root.appendChild(el('p', 'goal', '手を探しています…'));
       root.appendChild(cubeView(state, [], prefs));
+      // Keep the hands on screen while presses come in, or the next one has nowhere to land.
+      if (prefs.mode === 'sim') root.appendChild(controls(null));
       return;
     }
 
     if (job.stage === 'solved' && !finished()) {
       root.appendChild(solvedCard());
       root.appendChild(cubeView(state, [], prefs));
-      if (prefs.mode === 'sim') root.appendChild(pad(null));
+      if (prefs.mode === 'sim') root.appendChild(controls(null));
       root.appendChild(footLink());
       return;
     }
@@ -165,7 +198,7 @@
     root.appendChild(el('p', 'goal', job.goal));
     root.appendChild(cubeView(state, highlight(prefs.level), prefs));
     // On screen the pad is the hands, so it sits right under the cube it turns.
-    if (prefs.mode === 'sim') root.appendChild(pad(prefs.level >= 3 || peek ? job.moves[pos] : null));
+    if (prefs.mode === 'sim') root.appendChild(controls(prefs.level >= 3 || peek ? job.moves[pos] : null));
     root.appendChild(levelSwitch(prefs.level));
     root.appendChild(hintCard(prefs.level));
 
@@ -349,6 +382,30 @@
     return grid;
   }
 
+  /** The pad, and a field for typing a whole sequence. */
+  function controls(next) {
+    const box = el('div', 'controls');
+    box.appendChild(pad(next));
+    const form = el('form', 'cmd');
+    const field = el('input');
+    field.type = 'text';
+    field.value = typed;
+    field.placeholder = "R U R' U' のように入力";
+    field.setAttribute('aria-label', '回す手順');
+    field.autocomplete = 'off';
+    field.spellcheck = false;
+    field.setAttribute('autocapitalize', 'characters');
+    field.setAttribute('enterkeyhint', 'go');
+    field.addEventListener('input', () => { typed = field.value; });
+    form.append(field, button('回す', 'small'));
+    form.lastChild.type = 'submit';
+    form.addEventListener('submit', ev => { ev.preventDefault(); runTyped(); });
+    box.appendChild(form);
+    if (typedError) box.appendChild(el('p', 'error', typedError));
+    box.appendChild(el('p', 'note kbd-hint', "キーボードでも回せます: R で R、Shift+R で R'（U D L F B も同じ）"));
+    return box;
+  }
+
   function actions() {
     const row = el('div', 'btns');
     const undo = button('1手戻す', null, back);
@@ -382,8 +439,11 @@
       judge(source === 'pad' ? RETHINK_MS : 0);
     },
     onKey(ev) {
-      if (ev.key === ' ' || ev.key === 'ArrowRight') { ev.preventDefault(); advance(); }
-      else if (ev.key === 'ArrowLeft') { ev.preventDefault(); back(); }
+      if (ev.key === ' ' || ev.key === 'ArrowRight') { ev.preventDefault(); advance(); return; }
+      if (ev.key === 'ArrowLeft') { ev.preventDefault(); back(); return; }
+      // Letters turn the cube on screen; the real one is in the user's hands.
+      const move = Store.prefs().mode === 'sim' ? MoveWords.fromKey(ev) : null;
+      if (move) { ev.preventDefault(); turn(move); }
     },
   };
 })();

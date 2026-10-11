@@ -139,6 +139,24 @@ with sync_playwright() as p:
     page.fill("#seq", "R U R' U'")
     page.click("#apply-seq")
     check("正しい手順は適用される", page.locator("#seq-error").is_hidden())
+    page.fill("#seq", "RUR'U'")
+    page.click("#apply-seq")
+    check("空白なしの手順も適用される", page.locator("#seq-error").is_hidden()
+          and page.input_value("#seq") == "")
+
+    # キーボード: R で R、Shift+R で R'。入力欄に打っている間は回さない
+    before = read_net(page)
+    page.locator("#seq").focus()
+    page.keyboard.press("r")
+    check("入力欄に打った文字ではキューブが回らない", read_net(page) == before)
+    page.fill("#seq", "")
+    page.evaluate("() => document.activeElement.blur()")
+    page.keyboard.press("r")
+    expected = page.evaluate(
+        "(s) => { const c = new Cube(); c.setState(s); c.applyMove('R'); return c.getState(); }", before)
+    check("R キーで R が回る", read_net(page) == expected)
+    page.keyboard.press("Shift+R")
+    check("Shift+R で逆に回って戻る", read_net(page) == before)
 
     # 写真から 6 面を読み取る: スクランブルした状態を撮った体で、
     # 完成状態に戻してから読み込み、元のスクランブルに復元されるか
