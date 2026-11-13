@@ -12,6 +12,12 @@
  * scan.js samples — the guide grid is not an approximation of where the colours
  * are read, it is where they are read.
  *
+ * Each shot averages a short burst of frames, and the grid is looked for near
+ * the guide rather than trusted blindly (Scan.locateGrid), so a cheap webcam
+ * and a cube held a little off-centre still give steady colours. A camera that
+ * faces the user (a laptop or monitor webcam) is shown mirrored, the way people
+ * expect to see themselves; the pixels read are the unmirrored ones.
+ *
  * If the camera is unavailable (no permission, no device, or a page served over
  * plain http), the same flow runs off picked image files, one per face.
  *
@@ -22,6 +28,10 @@
   'use strict';
 
   const FILL = 0.62;               // guide square, as a fraction of the preview
+  const WORK = 480;                // the square is read at most this many pixels across
+  const BURST = 5;                 // frames averaged per shot
+  const BURST_GAP = 60;            // ms between them
+  const LIVE_EVERY = 250;          // ms between live colour previews
   const el = (tag, cls, text) => {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -32,16 +42,18 @@
   /**
    * Build the capture UI inside `root`.
    * @param {HTMLElement} root
-   * @param {{onState: function(object, Array): void, onClose: function(): void}} opts
-   *   `onState` receives the read state and the list of stickers whose colour
-   *   was a close call, so the caller can point at them instead of claiming
-   *   the read was certain.
+   * @param {{onState: function(object): void, onClose: function(): void}} opts
+   *   `onState` receives everything Scan.toState returns — the state, and the
+   *   stickers that were close calls or were inferred from the pieces — so the
+   *   caller can point at them instead of claiming the read was certain.
    */
   function create(root, opts) {
     const faces = Scan.FACE_ORDER;
     const shots = [];                 // RGB samples per captured face, in order
     let stream = null;
     let live = false;
+    let busy = false;
+    let timer = null;
 
     root.textContent = '';
     const stage = el('div', 'cam-stage');
@@ -49,7 +61,13 @@
     video.playsInline = true;
     video.muted = true;
     const guide = el('div', 'cam-guide');
-    for (let i = 0; i < 9; i++) guide.appendChild(el('div', 'cam-cell'));
+    const cells = [];
+    for (let i = 0; i < 9; i++) {
+      const cell = el('div', 'cam-cell');
+      cell.appendChild(el('span', 'cam-dot'));
+      cells.push(cell);
+      guide.appendChild(cell);
+    }
     guide.style.width = `${FILL * 100}%`;
     guide.style.height = `${FILL * 100}%`;
     stage.append(video, guide);
@@ -83,7 +101,7 @@
       hold.textContent = info.hold;
       progress.textContent = `${shots.length} / 6 面`;
       back.disabled = shots.length === 0;
-      shoot.disabled = !live;
+      shoot.disabled = !live || busy;
     }
 
     function fail(message) {
@@ -94,8 +112,8 @@
     const clearError = () => { error.hidden = true; };
 
     /** One face captured from any square-croppable source. */
-    function take(source, width, height) {
-      shots.push(sampleSquare(source, width, height, FILL));
+    function take(colours) {
+      shots.push(colours);
       clearError();
       if (shots.length === faces.length) finish();
       else draw();
@@ -111,14 +129,24 @@
         fail(`色を読み取れませんでした: ${e.message}`);
         return;
       }
-      stop();
-      opts.onState(read.state, read.uncertain);
+      close();
+      opts.onState(read);
     }
 
     shoot.addEventListener('click', () => {
       if (!live) return fail('カメラが動いていません。「写真を選ぶ」を使ってください。');
       if (!video.videoWidth) return fail('カメラの映像がまだ届いていません。少し待ってから撮ってください。');
-      take(video, video.videoWidth, video.videoHeight);
+      busy = true;
+      draw();
+      sampleBurst(video, BURST).then(colours => {
+        busy = false;
+        if (live) take(colours);
+      }, () => {
+        busy = false;
+        if (!live) return;                  // closed while shooting
+        draw();
+        fail('カメラの映像が途切れました。もう一度撮ってください。');
+      });
     });
 
     back.addEventListener('click', () => {
@@ -128,7 +156,7 @@
     });
 
     quit.addEventListener('click', () => {
-      stop();
+      close();
       opts.onClose();
     });
 
@@ -137,7 +165,7 @@
       pick.value = '';                       // same file twice must still fire
       if (!file) return;
       loadImage(file).then(
-        img => take(img, img.naturalWidth, img.naturalHeight),
+        img => take(sampleSquare(img, img.naturalWidth, img.naturalHeight, FILL)),
         () => fail('画像を読み込めませんでした。別のファイルを試してください。'));
     });
 
@@ -151,8 +179,11 @@
         return;
       }
       try {
-        stream = await openStream();
+        const s = await openStream();
+        if (closed) { s.getTracks().forEach(t => t.stop()); return; }   // closed while asking
+        stream = s;
       } catch (e) {
+        if (closed) return;
         stage.classList.add('off');
         fail(`カメラを使えませんでした（${e.name}）。「写真を選ぶ」で 1 面ずつ読み込めます。`);
         return;
@@ -163,19 +194,55 @@
       } catch (e) {
         fail('映像を再生できませんでした。画面をタップしてからもう一度お試しください。');
       }
+      const mirrored = isMirrored(stream);
+      stage.classList.toggle('mirror', mirrored);
       live = true;
       draw();
+      timer = setInterval(() => showLive(mirrored), LIVE_EVERY);
+    }
+
+    // Leaving the page (another tab, the home screen) must turn the camera off,
+    // and coming back turns it on again.
+    let closed = false, paused = false;
+    function onVisibility() {
+      if (document.hidden) {
+        if (live) { paused = true; stop(); }
+      } else if (paused && !closed) {
+        paused = false;
+        start();
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+
+    /** Done with this scanner for good. */
+    function close() {
+      closed = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      stop();
+    }
+
+    /** What the camera would read right now, as a dot in each guide cell. */
+    function showLive(mirrored) {
+      if (!live || busy || !video.videoWidth) return;
+      const colours = sampleSquare(video, video.videoWidth, video.videoHeight, FILL);
+      colours.forEach((rgb, i) => {
+        const col = i % 3, row = Math.floor(i / 3);
+        const shown = mirrored ? row * 3 + (2 - col) : i;   // the preview is flipped, the pixels are not
+        cells[shown].firstChild.style.background = `rgb(${rgb.join(',')})`;
+      });
     }
 
     /** Release the camera. A preview left running keeps the light on. */
     function stop() {
       live = false;
+      if (timer) clearInterval(timer);
+      timer = null;
       if (stream) stream.getTracks().forEach(t => t.stop());
       stream = null;
       video.srcObject = null;
     }
 
-    return { start, stop };
+    return { start, stop: close };
   }
 
   // ── pieces the phone app's scanner shares ───────────────────────────────
@@ -191,12 +258,44 @@
    */
   function sampleSquare(source, width, height, fill) {
     const side = Math.min(width, height);
+    const out = Math.min(side, WORK);           // downscaling averages pixels: less noise, less work
     const canvas = document.createElement('canvas');
-    canvas.width = side;
-    canvas.height = side;
+    canvas.width = out;
+    canvas.height = out;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, side, side);
-    return Scan.sampleFace(ctx, Scan.frameBox(side, side, fill));
+    ctx.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, out, out);
+    return Scan.sampleFace(ctx, Scan.frameBox(out, out, fill));
+  }
+
+  /**
+   * One shot from a playing video: `frames` frames a moment apart, averaged
+   * sticker by sticker. Sensor noise differs frame to frame; the cube does not.
+   * @returns {Promise<Array>} nine RGB samples
+   */
+  async function sampleBurst(video, frames, fill) {
+    const shots = [];
+    for (let i = 0; i < frames; i++) {
+      if (i) await new Promise(r => setTimeout(r, BURST_GAP));
+      if (!video.videoWidth) break;
+      shots.push(sampleSquare(video, video.videoWidth, video.videoHeight, fill || FILL));
+    }
+    if (!shots.length) throw new Error('no frames');
+    return shots[0].map((_, s) => [0, 1, 2].map(k =>
+      Math.round(shots.reduce((sum, shot) => sum + shot[s][k], 0) / shots.length)));
+  }
+
+  /**
+   * Whether to show the preview mirrored: yes for a camera that faces the
+   * user. When the camera does not say which way it faces, a desktop webcam
+   * faces the user and a phone gave us the rear camera we asked for.
+   */
+  function isMirrored(stream) {
+    const track = stream && stream.getVideoTracks()[0];
+    const settings = track && track.getSettings ? track.getSettings() : {};
+    if (settings.facingMode === 'user') return true;
+    if (settings.facingMode === 'environment') return false;
+    const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    return !touch;
   }
 
   const canStream = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -218,5 +317,5 @@
     });
   }
 
-  window.Camera = { create, FILL, sampleSquare, canStream, openStream, loadImage };
+  window.Camera = { create, FILL, BURST, sampleSquare, sampleBurst, isMirrored, canStream, openStream, loadImage };
 })();

@@ -24,7 +24,7 @@ const path = require('path');
 // ブラウザ用のファイルをそのまま読み込む（ビルド無しを保つため）
 global.window = global;
 for (const f of ['cube.js', 'cubie.js', 'two-phase.js', 'cfop.js', 'glossary.js',
-                 'search.js', 'algs.js', 'step.js', 'scan.js', 'move-words.js']) {
+                 'search.js', 'algs.js', 'step.js', 'resolve.js', 'scan.js', 'move-words.js']) {
   // eslint-disable-next-line no-eval
   eval(fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8'));
 }
@@ -302,6 +302,70 @@ check(`案内どおりに回すと完成する × ${runs}`, stepFail === 0, `${s
 check('どの案内にも「場所」のヒントがある', noWhere === 0, `${noWhere} 件が空`);
 console.log(`      1 回の解に ${(stepCount / runs).toFixed(1)} ステップ・` +
             `${(stepMoves / runs).toFixed(1)} 手 / 1 ステップの探索は最長 ${worstMs} ms`);
+
+// ── 9. 色の読み取り ─────────────────────────────────────────────────────────
+// 実物のキューブを撮った RGB（dwalton76/rubiks-color-resolver の test-data、MIT）。
+const realRgb = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'real-rgb.json'), 'utf8'));
+const faceString = state => {
+  const toFace = {};
+  for (const f of Scan.FACE_ORDER) toFace[state[f][4]] = f;
+  return Scan.FACE_ORDER.map(f => state[f].map(c => toFace[c] || '?').join('')).join('');
+};
+const tint = s => s.map(([r, g, b]) => [Math.min(255, Math.round(r * 1.05)), Math.round(g * 0.85), Math.round(b * 0.6)]);
+let realOk = 0, tintOk = 0, alwaysValid = true;
+for (const c of realRgb.cases) {
+  const a = Scan.toState(c.samples);
+  const b = Scan.toState(tint(c.samples));
+  if (faceString(a.state) === c.expect) realOk++;
+  if (faceString(b.state) === c.expect) tintOk++;
+  alwaysValid = alwaysValid && Cubie.validate(a.state).ok && Cubie.validate(b.state).ok;
+}
+check(`実物の RGB を全部正しく読む（${realOk}/${realRgb.cases.length}）`, realOk === realRgb.cases.length);
+check(`電球色のかぶりでも読む（${tintOk}/${realRgb.cases.length}）`, tintOk === realRgb.cases.length);
+check('読んだ結果は必ず実在しうる状態になる', alwaysValid);
+
+// 1 面を 90° 回して撮っても、回したと気づいて直す（見た目が変わる面だけ）
+{
+  const c = realRgb.cases.find(x => x.name === 'random01') || realRgb.cases[realRgb.cases.length - 1];
+  const QUARTER = [6, 3, 0, 7, 4, 1, 8, 5, 2];
+  const turned = c.samples.slice();
+  const R = 9;                                     // R 面
+  for (let i = 0; i < 9; i++) turned[R + i] = c.samples[R + QUARTER[i]];
+  const r = Scan.toState(turned);
+  check('90° 回して撮った面を直す', faceString(r.state) === c.expect && r.rotated.some(x => x.face === 'R'),
+        JSON.stringify(r.rotated));
+}
+
+// わざと 1 マスの色を隣の色に寄せても、ありえる状態の側に直す
+{
+  const c = realRgb.cases[0];
+  const s = c.samples.map(x => x.slice());
+  const centre = { U: 4, R: 13, F: 22, D: 31, L: 40, B: 49 };
+  // 0 番（U 面左上・角のマス）を、別の面の中心の色に寄せる
+  const other = c.expect[0] === 'U' ? 'F' : 'U';
+  s[0] = s[0].map((v, k) => Math.round(v * 0.45 + s[centre[other]][k] * 0.55));
+  const r = Scan.toState(s);
+  check('取り違えた 1 マスを、駒の制約で直す', faceString(r.state) === c.expect,
+        `corrected=${JSON.stringify(r.corrected)}`);
+}
+
+// 実写（dwalton76/rubiks-cube-tracker の test-data、MIT）。中央の正方形を 360px に縮めたもの。
+// キューブは案内の枠からずれて写っていて、白と黄は露出オーバーでほぼ同じ RGB になっている。
+// 枠を探し直す処理と駒の制約で、安いウェブカメラ相当の解像度まで落としても同じ答えになるか。
+{
+  const png = require('./png.js');
+  const PHOTO = 'LBBUURDDRDDLBRFRBDLLFRFRBLURFFLDLDBLURFULFBUUUDFDBFBUR';   // 同リポジトリの resolver の答え
+  const photos = Scan.FACE_ORDER.map(f => png.decode(path.join(__dirname, 'fixtures', 'photo', `${f}.png`)));
+  for (const size of [360, 240, 120, 90]) {
+    const t0 = Date.now();
+    const samples = photos.flatMap(img => {
+      const im = size === img.width ? img : png.shrink(img, size);
+      return Scan.sampleImage(im, Scan.frameBox(size, size, 0.62)).colours;
+    });
+    const got = faceString(Scan.toState(samples).state);
+    check(`実写を ${size}px 四方で読む（${Date.now() - t0} ms）`, got === PHOTO, got);
+  }
+}
 
 // ── 10. 手の言い方 ──────────────────────────────────────────────────────────
 // 「上の面を左へ」と書いたら、本当に手前の上段が左へ行くか。言葉が逆なら、

@@ -12,7 +12,8 @@
  * names the clusters by matching all six against reference colours at once, so
  * a global colour cast moves every cluster together and cancels out.
  *
- * Depends on: nothing. Pure functions, so the whole thing is testable off-line.
+ * Depends on: resolve.js (and through it cubie.js). Pure functions, so the
+ * whole thing is testable off-line.
  */
 
 (function () {
@@ -46,7 +47,8 @@
   const V_WEIGHT = 0.2;      // brightness is the least trustworthy axis
   const CENTRES = [4, 13, 22, 31, 40, 49];
   const PER_COLOUR = 9;
-  const UNSURE_RATIO = 0.7;  // best/second-best above this and we say so
+  const UNSURE_GAP = 2.0;    // cost gap to the runner-up below this and we say so
+  const ROTATE_MARGIN = 6.0; // a turned face must fit this much better to be believed
 
   // ── colour space ──────────────────────────────────────────────────────────
 
@@ -153,94 +155,306 @@
 
   // ── the entry point ───────────────────────────────────────────────────────
 
-  /**
-   * Turn 54 samples into a cube state.
-   * @param {Array<[number, number, number]>} samples RGB per sticker, in face
-   *   order U R F D L B, nine each, row-major (top-left first).
-   * @returns {{state: object, uncertain: Array<{face: string, index: number}>}}
-   *   `uncertain` lists the stickers whose second-best colour was nearly as
-   *   good — the ones worth a human glance before solving.
-   */
-  function toState(samples) {
-    if (samples.length !== 54) throw new Error(`54 マス分の色が必要です（${samples.length} 個でした）`);
+  // Rotating a face's nine stickers a quarter turn clockwise, as seen from
+  // outside the face: new[r][c] = old[2-c][r].
+  const QUARTER = [6, 3, 0, 7, 4, 1, 8, 5, 2];
 
-    const points = samples.map(feature);
+  function rotateFace(samples, face, quarters) {
+    const out = samples.slice();
+    for (let q = 0; q < quarters; q++) {
+      const base = face * 9;
+      const block = out.slice(base, base + 9);
+      for (let i = 0; i < 9; i++) out[base + i] = block[QUARTER[i]];
+    }
+    return out;
+  }
+
+  /**
+   * Capacity-constrained clustering, then the cheapest legal cube under those
+   * clusters, then the clusters re-estimated from that cube. Returns the costs
+   * as well, so callers can say how sure each sticker is.
+   */
+  function readOnce(points) {
     const others = points.map((_, i) => i).filter(i => !CENTRES.includes(i));
     const otherPoints = others.map(i => points[i]);
 
     let seeds = CENTRES.map(i => points[i]);
-    let result = null;
-    // Re-centring on the clusters found so far absorbs per-face lighting; three
-    // rounds is where it stops moving on real photographs.
     for (let round = 0; round < 3; round++) {
-      result = assign(otherPoints, seeds, PER_COLOUR - 1);
+      const result = assign(otherPoints, seeds, PER_COLOUR - 1);
       seeds = seeds.map((seed, c) => {
         const members = others.filter((_, j) => result.label[j] === c).map(i => points[i]);
         return mean([points[CENTRES[c]], ...members]);
       });
     }
 
-    const names = nameClusters(seeds);
-    const state = { U: [], R: [], F: [], D: [], L: [], B: [] };
-    for (let c = 0; c < 6; c++) state[FACE_ORDER[c]][4] = names[c];
+    let solved = null, cost = null;
+    for (let round = 0; round < 2; round++) {
+      cost = costMatrix(points, seeds);
+      solved = Resolve.resolve(cost);
+      seeds = seeds.map((_, c) => mean(points.filter((__, i) => solved.faces[i] === c)));
+    }
+    return { faces: solved.faces, total: solved.cost, cost, seeds };
+  }
 
-    const uncertain = [];
-    others.forEach((i, j) => {
+  /**
+   * Squared distance to each cluster, scaled by how spread that cluster is, so
+   * a tight colour (white) and a loose one (orange under a lamp) are judged
+   * on the same footing.
+   */
+  function costMatrix(points, seeds) {
+    const spread = seeds.map(() => 0);
+    const near = points.map(p => {
+      let best = 0;
+      for (let c = 1; c < seeds.length; c++) if (dist2(p, seeds[c]) < dist2(p, seeds[best])) best = c;
+      return best;
+    });
+    const counts = seeds.map(() => 0);
+    points.forEach((p, i) => { spread[near[i]] += dist2(p, seeds[near[i]]); counts[near[i]] += 1; });
+    const floor = 1e-3;
+    const sigma = spread.map((s, c) => Math.max(floor, s / Math.max(1, counts[c])));
+    return points.map(p => seeds.map((s, c) => dist2(p, s) / sigma[c] + Math.log(sigma[c])));
+  }
+
+  /**
+   * Turn 54 samples into a cube state.
+   * @param {Array<[number, number, number]>} samples RGB per sticker, in face
+   *   order U R F D L B, nine each, row-major (top-left first).
+   * @returns {{state: object, uncertain: Array<{face: string, index: number}>,
+   *   corrected: Array<{face: string, index: number, from: string}>,
+   *   rotated: Array<{face: string, quarters: number}>, weakest: string}}
+   *   `state` always passes Cubie.validate. `corrected` lists the stickers
+   *   whose nearest colour would have made an impossible cube and that were
+   *   read as the colour the possible cube needs instead; `uncertain` the
+   *   close calls worth a glance; `rotated` the faces that were evidently
+   *   photographed turned and were read turned back; `weakest` the face whose
+   *   colours fitted worst — the one to photograph again if anything is off.
+   */
+  function toState(samples) {
+    if (samples.length !== 54) throw new Error(`54 マス分の色が必要です（${samples.length} 個でした）`);
+
+    let current = samples.slice();
+    let read = readOnce(current.map(feature));
+    const turns = [0, 0, 0, 0, 0, 0];
+    // A face held a quarter turn off still gives nine plausible colours, but
+    // its edges and corners stop matching their neighbours. Try each face at
+    // each turn and keep a turn only when the whole cube fits clearly better.
+    for (let pass = 0; pass < 3; pass++) {
+      let best = null;
+      for (let f = 0; f < 6; f++) {
+        for (let q = 1; q < 4; q++) {
+          const trial = rotateFace(current, f, q);
+          const r = readOnce(trial.map(feature));
+          if (!best || r.total < best.read.total) best = { f, q, trial, read: r };
+        }
+      }
+      if (best.read.total >= read.total - ROTATE_MARGIN) break;
+      current = best.trial;
+      read = best.read;
+      turns[best.f] = (turns[best.f] + best.q) % 4;
+    }
+
+    const names = nameClusters(read.seeds);
+    const state = { U: [], R: [], F: [], D: [], L: [], B: [] };
+    const uncertain = [], corrected = [];
+    const faceCost = [0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < 54; i++) {
       const face = FACE_ORDER[Math.floor(i / 9)];
       const index = i % 9;
-      state[face][index] = names[result.label[j]];
+      const pick = read.faces[i];
+      state[face][index] = names[pick];
+      if (CENTRES.includes(i)) continue;
 
-      const row = result.cost[j].slice().sort((a, b) => a - b);
-      if (row[1] > 0 && row[0] / row[1] > UNSURE_RATIO) uncertain.push({ face, index });
-    });
+      const row = read.cost[i];
+      faceCost[Math.floor(i / 9)] += row[pick];
+      let nearest = 0;
+      for (let c = 1; c < 6; c++) if (row[c] < row[nearest]) nearest = c;
+      if (nearest !== pick) {
+        corrected.push({ face, index, from: names[nearest] });
+        continue;
+      }
+      const others = row.filter((_, c) => c !== pick);
+      const second = Math.min(...others);
+      if (second - row[pick] < UNSURE_GAP) uncertain.push({ face, index });
+    }
+    let weakest = 0;
+    for (let f = 1; f < 6; f++) if (faceCost[f] > faceCost[weakest]) weakest = f;
 
-    return { state, uncertain };
+    return {
+      state, uncertain, corrected,
+      rotated: turns.map((q, f) => ({ face: FACE_ORDER[f], quarters: q })).filter(r => r.quarters),
+      weakest: FACE_ORDER[weakest],
+    };
+  }
+
+  const SPOT = ['左上', '上', '右上', '左', '中央', '右', '左下', '下', '右下'];
+  const spots = list => list.map(u => `${u.face} 面の${SPOT[u.index]}`).join('、');
+
+  /**
+   * What a read did, in sentences for the person holding the cube: faces
+   * turned back, stickers inferred from the pieces, close calls, and which
+   * face to photograph again if anything still looks wrong.
+   * @param {ReturnType<typeof toState>} read
+   * @returns {string[]}
+   */
+  function describe(read) {
+    const out = [];
+    for (const r of read.rotated) {
+      out.push(`${r.face} 面は ${r.quarters * 90}° 回った向きで撮れていたので、向きを直して読みました。`);
+    }
+    if (read.corrected.length) {
+      out.push(`${read.corrected.length} マス（${spots(read.corrected)}）は、見えた色のままだと実物にない駒になるので、`
+        + 'ほかのマスとの組み合わせから色を決めました（橙の枠）。');
+    }
+    if (read.uncertain.length) {
+      out.push(`${read.uncertain.length} マス（${spots(read.uncertain)}）は色が際どいです（赤い枠）。`);
+    }
+    if (read.corrected.length + read.uncertain.length >= 3) {
+      out.push(`実物と違うところがあれば、${read.weakest} 面を明るい所で撮り直すと直りやすいです。`);
+    }
+    return out;
   }
 
   // ── sampling pixels ───────────────────────────────────────────────────────
 
   /**
-   * The median colour of a patch — median, not mean, so one glare highlight or
-   * the black gap between stickers cannot drag the answer.
+   * The colour of a patch: the mean of the middle half of the pixels, ranked
+   * by brightness. Dropping the darkest quarter keeps the black gap between
+   * stickers out; dropping the brightest keeps a glare highlight out; averaging
+   * what is left over every pixel (rather than a median of a few) is what lets
+   * a noisy low-resolution webcam give a steady colour.
    */
   function patchColour(data, width, x0, y0, w, h) {
-    const channels = [[], [], []];
-    const stepX = Math.max(1, Math.floor(w / 12));
-    const stepY = Math.max(1, Math.floor(h / 12));
+    const stepX = Math.max(1, Math.floor(w / 24));
+    const stepY = Math.max(1, Math.floor(h / 24));
+    const px = [];
     for (let y = y0; y < y0 + h; y += stepY) {
       for (let x = x0; x < x0 + w; x += stepX) {
         const p = (y * width + x) * 4;
-        channels[0].push(data[p]);
-        channels[1].push(data[p + 1]);
-        channels[2].push(data[p + 2]);
+        px.push([data[p], data[p + 1], data[p + 2], data[p] + data[p + 1] + data[p + 2]]);
       }
     }
-    return channels.map(list => {
-      list.sort((a, b) => a - b);
-      return list[Math.floor(list.length / 2)];
-    });
+    px.sort((a, b) => a[3] - b[3]);
+    const lo = Math.floor(px.length / 4);
+    const hi = Math.max(lo + 1, Math.ceil(px.length * 3 / 4));
+    const sum = [0, 0, 0];
+    for (let i = lo; i < hi; i++) for (let k = 0; k < 3; k++) sum[k] += px[i][k];
+    return sum.map(v => Math.round(v / (hi - lo)));
+  }
+
+  /** Brightest channel at a pixel, clamped to the image. Stickers are bright, the plastic is not. */
+  function peak(img, x, y) {
+    const xi = Math.min(img.width - 1, Math.max(0, Math.round(x)));
+    const yi = Math.min(img.height - 1, Math.max(0, Math.round(y)));
+    const p = (yi * img.width + xi) * 4;
+    const d = img.data;
+    return Math.max(d[p], d[p + 1], d[p + 2]);
   }
 
   /**
-   * Nine colours out of a square region of a canvas.
-   * @param {CanvasRenderingContext2D} ctx
-   * @param {{x: number, y: number, size: number}} box the 3x3 area on screen
+   * How much `box` looks like a 3x3 cube face: bright, even sticker cores
+   * against dark lines where the gaps between stickers should be.
    */
-  function sampleFace(ctx, box) {
+  function gridScore(img, box) {
     const { x, y, size } = box;
-    const img = ctx.getImageData(x, y, size, size);
+    const cell = size / 3;
+    let core = 0, coreN = 0, spread = 0, gap = 0, gapN = 0;
+    const N = 4;                                   // samples per cell side
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        const vals = [];
+        for (let i = 0; i < N; i++) {
+          for (let j = 0; j < N; j++) {
+            vals.push(peak(img, x + (c + 0.3 + 0.4 * j / (N - 1)) * cell,
+                                y + (r + 0.3 + 0.4 * i / (N - 1)) * cell));
+          }
+        }
+        const m = vals.reduce((a, b) => a + b, 0) / vals.length;
+        core += m; coreN += 1;
+        spread += Math.sqrt(vals.reduce((a, v) => a + (v - m) * (v - m), 0) / vals.length);
+      }
+    }
+    // the two inner lines each way, sampled along their length
+    for (const k of [1, 2]) {
+      for (let t = 0.1; t < 3; t += 0.2) {
+        gap += peak(img, x + k * cell, y + t * cell) + peak(img, x + t * cell, y + k * cell);
+        gapN += 2;
+      }
+    }
+    return core / coreN - gap / gapN - spread / coreN;
+  }
+
+  /**
+   * Nudge the guide square onto the cube actually in the picture. People do
+   * not hold a cube exactly in the guide, and a low-resolution camera cannot
+   * spare the pixels lost when every sample sits a little off-centre. Tries
+   * sizes and offsets around `box` and keeps the one that looks most like a
+   * 3x3 grid — but only when it is clearly better than the guide as drawn.
+   */
+  function locateGrid(img, box) {
+    const base = gridScore(img, box);
+    let best = { box, score: base };
+    const cx0 = box.x + box.size / 2, cy0 = box.y + box.size / 2;
+    const tryBox = (size, cx, cy) => {
+      const b = { x: cx - size / 2, y: cy - size / 2, size };
+      if (b.x < 0 || b.y < 0 || b.x + size > img.width || b.y + size > img.height) return;
+      const sc = gridScore(img, b);
+      if (sc > best.score) best = { box: b, score: sc };
+    };
+    // coarse: sizes 55%..115% of the guide, centre within a third of it
+    for (let k = 0.55; k <= 1.151; k += 0.05) {
+      const size = box.size * k;
+      for (let dy = -0.3; dy <= 0.301; dy += 0.05) {
+        for (let dx = -0.3; dx <= 0.301; dx += 0.05) tryBox(size, cx0 + dx * box.size, cy0 + dy * box.size);
+      }
+    }
+    // fine: around the coarse winner
+    const c = best.box;
+    const ccx = c.x + c.size / 2, ccy = c.y + c.size / 2;
+    for (let k = -0.04; k <= 0.041; k += 0.02) {
+      for (let dy = -0.025; dy <= 0.026; dy += 0.0125) {
+        for (let dx = -0.025; dx <= 0.026; dx += 0.0125) {
+          tryBox(c.size * (1 + k), ccx + dx * box.size, ccy + dy * box.size);
+        }
+      }
+    }
+    const margin = 8;                   // in brightness levels: a real grid scores far above this
+    if (best.score < base + margin) return { box, moved: false };
+    const b = best.box;
+    return { box: { x: Math.round(b.x), y: Math.round(b.y), size: Math.round(b.size) }, moved: true };
+  }
+
+  /**
+   * Nine colours out of an image.
+   * @param {{data: Uint8ClampedArray, width: number, height: number}} img
+   *   RGBA pixels, as ImageData has them
+   * @param {{x: number, y: number, size: number}} box the guide square
+   * @param {{locate?: boolean}} [opts] locate (default true): look for the
+   *   cube near the guide instead of trusting it
+   * @returns {{colours: Array<[number, number, number]>, box: object}}
+   */
+  function sampleImage(img, box, opts) {
+    const where = (!opts || opts.locate !== false) ? locateGrid(img, box).box : box;
+    const { x, y, size } = where;
     const cell = size / 3;
     const inset = cell * 0.25;            // stay off the sticker edges
     const side = Math.max(1, Math.round(cell - inset * 2));
-
-    const out = [];
+    const colours = [];
     for (let r = 0; r < 3; r++) {
       for (let c = 0; c < 3; c++) {
-        out.push(patchColour(img.data, size,
-          Math.round(c * cell + inset), Math.round(r * cell + inset), side, side));
+        colours.push(patchColour(img.data, img.width,
+          Math.round(x + c * cell + inset), Math.round(y + r * cell + inset), side, side));
       }
     }
-    return out;
+    return { colours, box: where };
+  }
+
+  /**
+   * Nine colours out of a canvas, around the guide square `box`.
+   * @param {CanvasRenderingContext2D} ctx
+   */
+  function sampleFace(ctx, box, opts) {
+    const img = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height);
+    return sampleImage(img, box, opts).colours;
   }
 
   /** The largest centred square that fits, at `fill` of the shorter side. */
@@ -251,6 +465,6 @@
 
   window.Scan = {
     FACE_ORDER, INSTRUCTIONS, LETTERS,
-    rgbToHsv, feature, toState, sampleFace, frameBox, patchColour,
+    rgbToHsv, feature, toState, describe, sampleFace, sampleImage, locateGrid, frameBox, patchColour,
   };
 })();
