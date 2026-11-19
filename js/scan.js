@@ -456,15 +456,6 @@
     return sum.map(v => Math.round(v / (hi - lo)));
   }
 
-  /** Brightest channel at a pixel, clamped to the image. Stickers are bright, the plastic is not. */
-  function peak(img, x, y) {
-    const xi = Math.min(img.width - 1, Math.max(0, Math.round(x)));
-    const yi = Math.min(img.height - 1, Math.max(0, Math.round(y)));
-    const p = (yi * img.width + xi) * 4;
-    const d = img.data;
-    return Math.max(d[p], d[p + 1], d[p + 2]);
-  }
-
   /**
    * A point on the face, in cell units (0..3 across, 0..3 down), mapped into
    * the image. `box.angle` (radians, default 0) turns the grid about its centre,
@@ -478,37 +469,95 @@
     return [cx + px * Math.cos(a) - py * Math.sin(a), cy + px * Math.sin(a) + py * Math.cos(a)];
   }
 
+  // gridScore weights, set on the cubes in test/fixtures/photo (stickers on
+  // black plastic) and on webcam frames of a stickerless cube, whose pieces
+  // touch with only a faint line between them
+  const W_ODD = 60;      // per cell whose colour no sticker has
+  const W_OUTER = 0.5;   // colour change across the outline, all four sides
+  const W_SIDE = 0.5;    // ... and on the second-weakest side
+  const W_INNER = 0.4;   // colour change between neighbouring cells
+  const W_SEAM = 1;      // inner lines darker than the cells either side
+  const W_SPREAD = 1.5;  // colour wobble inside a cell
+
   /**
-   * How much `box` looks like a 3x3 cube face: bright, even sticker cores
-   * against dark lines where the gaps between stickers should be.
+   * How much `box` looks like a 3x3 cube face, by colour: nine cells that are
+   * each one even sticker colour, a clear change of colour across the outline
+   * (the cube against the hand or the room), and darker lines between cells
+   * where there are any. Black gaps between stickers help but are not needed,
+   * so a stickerless cube is found as well as a stickered one.
    */
   function gridScore(img, box) {
-    let core = 0, spread = 0, gap = 0, gapN = 0;
-    const N = 4;                                   // samples per cell side
-    for (let r = 0; r < 3; r++) {
-      for (let c = 0; c < 3; c++) {
-        const vals = [];
-        for (let i = 0; i < N; i++) {
-          for (let j = 0; j < N; j++) {
-            const [px, py] = gridPoint(box, c + 0.3 + 0.4 * j / (N - 1), r + 0.3 + 0.4 * i / (N - 1));
-            vals.push(peak(img, px, py));
+    const { width, height, data } = img;
+    const cell = box.size / 3;
+    const a = box.angle || 0, cos = Math.cos(a) * cell, sin = Math.sin(a) * cell;
+    const cx = box.x + box.size / 2, cy = box.y + box.size / 2;
+    // the pixel at (u, v) in cell units, into r/g/b below
+    let r = 0, g = 0, b = 0;
+    const at = (u, v) => {
+      const px = u - 1.5, py = v - 1.5;
+      const xi = Math.min(width - 1, Math.max(0, Math.round(cx + px * cos - py * sin)));
+      const yi = Math.min(height - 1, Math.max(0, Math.round(cy + px * sin + py * cos)));
+      const p = (yi * width + xi) * 4;
+      r = data[p]; g = data[p + 1]; b = data[p + 2];
+    };
+    const N = 4;                                       // samples per cell side
+    const mean = new Float64Array(27);                 // r, g, b of each cell
+    let spread = 0, odd = 0;
+    for (let k = 0; k < 9; k++) {
+      let sr = 0, sg = 0, sb = 0, sq = 0;
+      for (let i = 0; i < N; i++) {
+        for (let j = 0; j < N; j++) {
+          at(k % 3 + 0.25 + 0.5 * j / (N - 1), Math.floor(k / 3) + 0.25 + 0.5 * i / (N - 1));
+          sr += r; sg += g; sb += b; sq += r * r + g * g + b * b;
+        }
+      }
+      const n = N * N, mr = sr / n, mg = sg / n, mb = sb / n;
+      mean[k * 3] = mr; mean[k * 3 + 1] = mg; mean[k * 3 + 2] = mb;
+      spread += Math.sqrt(Math.max(0, sq / n - mr * mr - mg * mg - mb * mb));
+      // a sticker is a strong colour or a bright white, even in poor light;
+      // hair, shadow and dark clothes are neither
+      const hi = Math.max(mr, mg, mb), lo = Math.min(mr, mg, mb);
+      const colour = Math.min(1, (hi - lo) / Math.max(1, hi) / 0.45) * Math.min(1, hi / 70);
+      const white = Math.min(1, Math.max(0, (lo - 70) / 70));
+      odd += 1 - Math.max(colour, white);
+    }
+    const away = k => Math.hypot(r - mean[k * 3], g - mean[k * 3 + 1], b - mean[k * 3 + 2]);
+    const apart = (k, l) => Math.hypot(mean[k * 3] - mean[l * 3], mean[k * 3 + 1] - mean[l * 3 + 1], mean[k * 3 + 2] - mean[l * 3 + 2]);
+    let inner = 0;
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 2; j++) inner += apart(i * 3 + j, i * 3 + j + 1) + apart(j * 3 + i, (j + 1) * 3 + i);
+    }
+    // just outside each edge cell, against that cell: top, bottom, left, right
+    const OFF = 0.2;
+    const side = [0, 0, 0, 0];
+    for (let k = 0; k < 3; k++) {
+      for (const t of [0.3, 0.5, 0.7]) {
+        at(k + t, -OFF); side[0] += away(k);
+        at(k + t, 3 + OFF); side[1] += away(6 + k);
+        at(-OFF, k + t); side[2] += away(k * 3);
+        at(3 + OFF, k + t); side[3] += away(k * 3 + 2);
+      }
+    }
+    side.sort((p, q) => p - q);
+    const outer = (side[0] + side[1] + side[2] + side[3]) / 36;
+    // each of the twelve pieces of inner line, at its darkest, against the cells either side
+    const lum = k => (mean[k * 3] + mean[k * 3 + 1] + mean[k * 3 + 2]) / 3;
+    let seam = 0;
+    for (const k of [1, 2]) {
+      for (let j = 0; j < 3; j++) {
+        let dv = 255, dh = 255;
+        for (const t of [0.3, 0.5, 0.7]) {
+          for (const w of [-0.06, 0, 0.06]) {
+            at(k + w, j + t); dv = Math.min(dv, (r + g + b) / 3);
+            at(j + t, k + w); dh = Math.min(dh, (r + g + b) / 3);
           }
         }
-        const m = vals.reduce((a, b) => a + b, 0) / vals.length;
-        core += m;
-        spread += Math.sqrt(vals.reduce((a, v) => a + (v - m) * (v - m), 0) / vals.length);
+        seam += Math.max(0, (lum(j * 3 + k - 1) + lum(j * 3 + k)) / 2 - dv);
+        seam += Math.max(0, (lum((k - 1) * 3 + j) + lum(k * 3 + j)) / 2 - dh);
       }
     }
-    // the two inner lines each way, sampled along their length
-    for (const k of [1, 2]) {
-      for (let t = 0.1; t < 3; t += 0.2) {
-        const [ax, ay] = gridPoint(box, k, t);
-        const [bx, by] = gridPoint(box, t, k);
-        gap += peak(img, ax, ay) + peak(img, bx, by);
-        gapN += 2;
-      }
-    }
-    return core / 9 - gap / gapN - spread / 9;
+    return -W_ODD * odd + W_OUTER * outer + W_SIDE * side[1] / 9 + W_INNER * inner / 12 +
+      W_SEAM * seam / 12 - W_SPREAD * spread / 9;
   }
 
   const DEG = Math.PI / 180;
@@ -575,7 +624,7 @@
       }
       if (cur.score > best.score) best = cur;
     }
-    const margin = 8;                   // in brightness levels: a real grid scores far above this
+    const margin = 8;                   // a real grid scores far above this
     if (!best.size || best.score < base + margin) return { box, moved: false, score: base };
     const b = { x: Math.round(best.cx - best.size / 2), y: Math.round(best.cy - best.size / 2), size: Math.round(best.size) };
     // a turn under 2° reads the same as none
@@ -628,6 +677,6 @@
 
   window.Scan = {
     FACE_ORDER, INSTRUCTIONS, LETTERS,
-    rgbToHsv, feature, toState, toStateAnyOrder, costRows, guessColour, FACE_OF, describe, sampleFace, sampleImage, locateGrid, gridPoint, frameBox, patchColour,
+    rgbToHsv, feature, toState, toStateAnyOrder, costRows, guessColour, FACE_OF, describe, sampleFace, sampleImage, locateGrid, gridScore, gridPoint, frameBox, patchColour,
   };
 })();
