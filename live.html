@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#14161a">
+<title>Cube Trainer — カメラで追いかける</title>
+<link rel="stylesheet" href="css/live.css">
+</head>
+<body>
+<header class="top">
+  <h1>カメラで追いかける</h1>
+  <nav class="links" aria-label="ほかのページ">
+    <a href="index.html">PC 版</a>
+    <a href="app.html">スマホ版</a>
+  </nav>
+</header>
+
+<main class="live">
+  <section class="stage" id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="overlay" width="720" height="720" aria-hidden="true"></canvas>
+    <div class="start" id="start">
+      <p>キューブを持って、カメラに 1 面ずつ見せてください。<br>撮影ボタンはありません。面が止まると自動で読み取ります。</p>
+      <button type="button" id="open">カメラを起動</button>
+      <p class="err" id="err" hidden></p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <p class="note" id="note" data-kind="start">カメラを起動してください</p>
+    <p class="say" id="say"></p>
+    <section class="learn" id="learn" hidden aria-label="CFOP の手順と回転記号">
+      <ol class="stages" id="stages"></ol>
+      <p class="stage-does" id="stage-does"></p>
+      <div class="job">
+        <h2 id="job-title"></h2>
+        <p id="job-goal"></p>
+        <p class="dim" id="job-why"></p>
+        <p class="tech" id="job-name" hidden></p>
+      </div>
+      <ol class="seq" id="seq" aria-label="この段階の手順（回転記号）"></ol>
+      <p class="dim" id="trig" hidden></p>
+      <div class="now-move" id="now-move" hidden>
+        <span class="big" id="mv-notation"></span>
+        <div>
+          <p id="mv-face"></p>
+          <p id="mv-turn"></p>
+          <p class="dim" id="mv-words"></p>
+        </div>
+      </div>
+      <details class="help">
+        <summary>回転記号の読み方</summary>
+        <p id="rule"></p>
+        <p id="grip"></p>
+      </details>
+    </section>
+    <section class="learn recap" id="recap" hidden aria-label="今日やったこと">
+      <h2>今日やったこと</h2>
+      <p id="recap-turns"></p>
+      <p id="recap-stages"></p>
+      <p class="dim" id="recap-moves"></p>
+    </section>
+    <ol class="chips" id="chips" aria-label="読み取った面（タップで撮り直し）"></ol>
+    <button type="button" id="force" class="ghost" hidden>違う面です。読み取ってください</button>
+    <div class="meta">
+      <span id="left"></span>
+      <div class="bar" id="bar" hidden aria-hidden="true"><i id="bar-fill"></i></div>
+      <div class="mode" role="group" aria-label="進め方">
+        <button type="button" data-mode="shortest" aria-pressed="true">最短</button>
+        <button type="button" data-mode="steps" aria-pressed="false">CFOP で覚える</button>
+      </div>
+      <button type="button" id="again" class="ghost">最初から読み直す</button>
+      <button type="button" id="sound" class="ghost" aria-pressed="true">音: オン</button>
+    </div>
+    <details class="help">
+      <summary>見方</summary>
+      <ul>
+        <li><span class="sw layer"></span>黄色の矢印: その列（または正面の面）を矢印の向きに回す。矢じりが 2 つなら 180°。</li>
+        <li><span class="sw whole"></span>水色の矢印: キューブ全体を矢印の向きに回して、別の面をカメラに向ける。</li>
+        <li>「最短」は矢印だけで最短手順を案内します。「CFOP で覚える」は、矢印に加えて回転記号と CFOP の段階の説明を出し、解きながら覚えられるようにします。</li>
+        <li>回せたら映像の縁が緑に、予定と違う手なら赤に光ります（音も鳴ります）。</li>
+        <li>違う手を回しても大丈夫です。まずその手を戻すよう案内し、ずれが大きいときはそこからの最短手順に切り替えます。</li>
+        <li>キューブが 1 分映らないと、次の人のために最初に戻ります。</li>
+      </ul>
+    </details>
+  </section>
+</main>
+
+<script src="js/cube.js"></script>
+<script src="js/cubie.js"></script>
+<script src="js/two-phase.js"></script>
+<script src="js/cfop.js"></script>
+<script src="js/search.js"></script>
+<script src="js/algs.js"></script>
+<script src="js/step.js"></script>
+<script src="js/resolve.js"></script>
+<script src="js/scan.js"></script>
+<script src="js/camera.js"></script>
+<script src="js/move-words.js"></script>
+<script src="js/track.js"></script>
+<script src="js/live/view.js"></script>
+<script src="js/live/overlay.js"></script>
+<script src="js/live/reader.js"></script>
+<script src="js/live/policy.js"></script>
+<script src="js/live/learn.js"></script>
+<script src="js/live/main.js"></script>
+</body>
+</html>

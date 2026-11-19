@@ -226,6 +226,12 @@
     const face = Scan.FACE_ORDER[shots.length];
     const info = Scan.INSTRUCTIONS[face];
     root.appendChild(header('読み取り', 'カメラで 6 面を撮る'));
+    const alt = el('p', 'note');
+    alt.append('撮影ボタンを使わず、カメラを向けたまま解き方まで案内する ');
+    const link = el('a', '', 'カメラで追いかける版');
+    link.href = 'live.html';
+    alt.append(link, ' もあります。');
+    root.appendChild(alt);
     root.appendChild(faceChips());
 
     const stage = el('div', 'cam' + (live ? '' : ' off') + (mirrored ? ' mirror' : ''));

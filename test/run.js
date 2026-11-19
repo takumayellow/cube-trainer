@@ -16,6 +16,8 @@
 //   9. Scan: 撮った色（照明のかぶり・ノイズ込み）から元の状態を復元できるか
 //  10. MoveWords: 手の言い方が、白を下・緑を手前に持ったときの実際の動きと一致するか
 //  11. MoveWords: 打ち込んだ手順とキー操作を正しい手に読むか
+//  12. カメラで追う: 面をどの順・どの向きで見せても読めるか、見えない手には面を見せる矢印を出すか、
+//      解き直しの方針（戻させる・最短に切り替える）、完成の確かめ方、CFOP の手のまとまり
 
 'use strict';
 const fs = require('fs');
@@ -406,6 +408,82 @@ check('キー: Ctrl / Alt / ⌘ 付きと変換中は回さない',
       key('r', { metaKey: true }) === null && key('r', { isComposing: true }) === null);
 check('キー: 面以外の文字は回さない', key('x') === null && key('Enter') === null);
 check('キー: 押しっぱなしのリピートでは回さない', key('r', { repeat: true }) === null);
+
+// ── 12. カメラで追う ────────────────────────────────────────────────────────
+for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js']) {
+  // eslint-disable-next-line no-eval
+  eval(fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8'));
+}
+{
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'real-rgb.json'), 'utf8')).cases[0];
+  const ref = Scan.toState(fx.samples).state;
+  const pool = {};
+  Scan.FACE_ORDER.forEach((f, k) => ref[f].forEach((c, i) => { (pool[c] = pool[c] || []).push(fx.samples[k * 9 + i]); }));
+  let seed = 3;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const pick = c => pool[c][Math.floor(rnd() * pool[c].length)];
+  const shoot = (st, f, q) => { const out = new Array(9); for (let i = 0; i < 9; i++) out[Track.TURN[q][i]] = pick(st[f][i]); return out; };
+
+  let readOk = 0;
+  for (let t = 0; t < 10; t++) {
+    const c = new Cube(); c.scramble(20);
+    const r = Reader.create();
+    const order = Scan.FACE_ORDER.slice().sort(() => rnd() - 0.5);
+    for (const f of order) r.offer(shoot(c.getState(), f, Math.floor(rnd() * 4)));
+    const out = r.finish();
+    if (out.ok && Scan.FACE_ORDER.every(f => out.read.state[f].join() === c.getState()[f].join())) readOk++;
+  }
+  check('読み取り: 面の順番と向きがばらばらでも元の状態を復元する', readOk === 10, `${readOk}/10`);
+
+  // U turned while the camera looks at U from... the U face itself is visible: spin.
+  const s0 = solved();
+  check('矢印: 正面の面の手は回転の矢印', Track.arrowFor('F', 'F', 0, s0).kind === 'spin' || Track.arrowFor('F', 'F', 0, s0).kind === 'show');
+  const mixed = after("R U F' L2 D B'").getState();
+  const spin = Track.arrowFor('F', 'F', 0, mixed);
+  check('矢印: 見えている面の手は spin', spin.kind === 'spin' && spin.dir === 'cw' && !spin.twice);
+  check('矢印: 180° は二重の矢じり', Track.arrowFor('F2', 'F', 0, mixed).twice === true);
+  // On a solved cube, U only moves the top rows of the side faces; looking at
+  // U itself, nothing changes, so the player must be shown a side.
+  const sh = Track.arrowFor('U', 'U', 0, s0);
+  check('矢印: 当てても見た目の変わらない面では、変わる面を見せる', sh.kind === 'show' && sh.face !== 'U' && sh.face !== 'D', JSON.stringify(sh));
+
+  // Policy: plan solves; a stray turn is first asked back.
+  const st = after("R U R' F2 D L'").getState();
+  const pol = Policy.create(st, { mode: 'shortest' });
+  check('方針: 最短手順は当てると完成する', after(pol.plan, st).isSolved(), pol.plan.join(' '));
+  const want = pol.plan[0];
+  const strayMove = ['U', 'D', 'R', 'L', 'F', 'B'].find(l => l !== want[0] && Track.OPPOSITE[l] !== want[0]);
+  const st2 = after([strayMove], st).getState();
+  pol.saw([strayMove], st2);
+  check('方針: 違う手を 1 回回したら、まずその手を戻させる',
+        pol.note.kind === 'undo' || pol.note.kind === 'adjust', pol.note.kind);
+  check('方針: 立て直した手順も当てると完成する', after(pol.plan, st2).isSolved());
+  const solvedPol = Policy.create(s0, { mode: 'shortest' });
+  check('方針: 完成した状態では手順なし', solvedPol.plan.length === 0 && solvedPol.note.kind === 'solved');
+
+  const steps = Policy.create(st, { mode: 'steps' });
+  check('方針: CFOP モードは段階名つきの手順を返す', steps.plan.length > 0 && !!steps.job && !!steps.job.stage);
+
+  const seen = new Set();
+  let face = 'F', q = 0, hops = 0;
+  for (let nx = Policy.checkNext(face, q, seen); nx; nx = Policy.checkNext(face, q, seen)) {
+    seen.add(face);
+    if (seen.size >= Policy.CHECK_FACES) break;
+    face = nx.target; hops++;
+    if (hops > 10) break;
+  }
+  check(`完成の確認: ${Policy.CHECK_FACES} 面を確かめると終わる`, seen.size === Policy.CHECK_FACES && hops < 10, `${seen.size}`);
+
+  check('CFOP: セクシームーブを 1 まとまりとして見つける',
+        JSON.stringify(Learn.groups(['F', 'R', 'U', "R'", "U'", "F'"])) === JSON.stringify([{ from: 1, to: 5, name: 'セクシームーブ' }]));
+  check('CFOP: 長いまとまりを優先する', Learn.groups(['R', 'U', "R'", "U'"])[0].to === 4);
+  check('CFOP: 名前の無い 3 手のまとまり', Learn.groups(['R', "U'", "R'"])[0].name === '');
+  const lm = Learn.move("R'");
+  check("CFOP: 記号の説明（R' = 右の面を反時計回り）", lm.face.includes('右') && lm.amount.includes('反時計'));
+  const tr = Learn.track([{ key: 'cross', done: true }, { key: 'f2l', done: false }], 'f2l');
+  check('CFOP: 段階の表示（済み・いま・これから）',
+        tr.map(x => x.state).join() === 'done,now,later,later');
+}
 
 console.log(`\n2 フェーズ法: 平均 ${(tpLen / (trials - tpFail)).toFixed(1)} 手 / 最大 ${tpMax} 手 / ` +
             `${((Date.now() - tpStart) / trials).toFixed(1)} ms per solve`);

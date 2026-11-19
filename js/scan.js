@@ -174,7 +174,8 @@
    * clusters, then the clusters re-estimated from that cube. Returns the costs
    * as well, so callers can say how sure each sticker is.
    */
-  function readOnce(points) {
+  /** Nine-per-colour clusters seeded by the six centres; position plays no part. */
+  function clusterSeeds(points) {
     const others = points.map((_, i) => i).filter(i => !CENTRES.includes(i));
     const otherPoints = others.map(i => points[i]);
 
@@ -186,7 +187,11 @@
         return mean([points[CENTRES[c]], ...members]);
       });
     }
+    return seeds;
+  }
 
+  function readOnce(points) {
+    let seeds = clusterSeeds(points);
     let solved = null, cost = null;
     for (let round = 0; round < 2; round++) {
       cost = costMatrix(points, seeds);
@@ -202,6 +207,13 @@
    * on the same footing.
    */
   function costMatrix(points, seeds) {
+    const sigma = spreads(points, seeds);
+    return points.map(p => costRow(p, seeds, sigma));
+  }
+
+  const costRow = (p, seeds, sigma) => seeds.map((s, c) => dist2(p, s) / sigma[c] + Math.log(sigma[c]));
+
+  function spreads(points, seeds) {
     const spread = seeds.map(() => 0);
     const near = points.map(p => {
       let best = 0;
@@ -211,8 +223,7 @@
     const counts = seeds.map(() => 0);
     points.forEach((p, i) => { spread[near[i]] += dist2(p, seeds[near[i]]); counts[near[i]] += 1; });
     const floor = 1e-3;
-    const sigma = spread.map((s, c) => Math.max(floor, s / Math.max(1, counts[c])));
-    return points.map(p => seeds.map((s, c) => dist2(p, s) / sigma[c] + Math.log(sigma[c])));
+    return spread.map((s, c) => Math.max(floor, s / Math.max(1, counts[c])));
   }
 
   /**
@@ -229,7 +240,8 @@
    *   photographed turned and were read turned back; `weakest` the face whose
    *   colours fitted worst — the one to photograph again if anything is off.
    */
-  function toState(samples) {
+  function toState(samples, opts) {
+    const tryTurns = !(opts && opts.turns === false);
     if (samples.length !== 54) throw new Error(`54 マス分の色が必要です（${samples.length} 個でした）`);
 
     let current = samples.slice();
@@ -238,7 +250,7 @@
     // A face held a quarter turn off still gives nine plausible colours, but
     // its edges and corners stop matching their neighbours. Try each face at
     // each turn and keep a turn only when the whole cube fits clearly better.
-    for (let pass = 0; pass < 3; pass++) {
+    for (let pass = 0; pass < (tryTurns ? 3 : 0); pass++) {
       let best = null;
       for (let f = 0; f < 6; f++) {
         for (let q = 1; q < 4; q++) {
@@ -283,7 +295,110 @@
       state, uncertain, corrected,
       rotated: turns.map((q, f) => ({ face: FACE_ORDER[f], quarters: q })).filter(r => r.quarters),
       weakest: FACE_ORDER[weakest],
+      palette: { seeds: read.seeds, sigma: spreads(current.map(feature), read.seeds), names },
     };
+  }
+
+  // ── any order, any turn ───────────────────────────────────────────────────
+
+  // Which face each centre colour sits on, holding white down and green front.
+  const FACE_OF = { Y: 'U', O: 'R', G: 'F', W: 'D', R: 'L', B: 'B' };
+
+  /** The ways to name six clusters, cheapest first. */
+  function rankNamings(seeds) {
+    const refs = LETTERS.map(c => featureFromHsv(REFERENCE[c]));
+    return PERMS.map(perm => {
+      let total = 0;
+      for (let c = 0; c < 6; c++) total += dist2(seeds[c], refs[perm[c]]);
+      return { names: perm.map(i => LETTERS[i]), total };
+    }).sort((a, b) => a.total - b.total);
+  }
+
+  const turnNine = (nine, quarters) => {
+    let out = nine;
+    for (let q = 0; q < quarters; q++) out = QUARTER.map(i => out[i]);
+    return out;
+  };
+
+  /**
+   * Read a cube from six photographed faces taken in any order, each held at
+   * any of the four turns.
+   *
+   * The centre colours say which face each photo is; the turn of each photo is
+   * whichever of the 4^6 combinations gives the cheapest legal cube, since a
+   * face held the wrong way round leaves its corners and edges disagreeing with
+   * their neighbours.
+   * @param {Array<Array<[number, number, number]>>} shots six lists of nine
+   *   RGB samples, each row-major as the camera saw it.
+   * @returns the result of toState, plus `placement`: for each shot, the face
+   *   it is and how many clockwise quarter turns took it to the cube's layout.
+   */
+  function toStateAnyOrder(shots) {
+    if (!Array.isArray(shots) || shots.length !== 6 || shots.some(s => !s || s.length !== 9)) {
+      throw new Error('6 面ぶん、各 9 マスの色が必要です');
+    }
+    const points = shots.flat().map(feature);
+    const seeds = clusterSeeds(points);
+    const sigma = spreads(points, seeds);
+    const rows = points.map(p => costRow(p, seeds, sigma));
+
+    let best = null;
+    rankNamings(seeds).slice(0, 2).forEach((naming, rank) => {
+      // The runner-up naming (usually red and orange swapped) has to earn its
+      // place: on a cube with little scrambling both namings fit equally well.
+      const handicap = rank * ROTATE_MARGIN;
+      const faceOf = naming.names.map(c => FACE_ORDER.indexOf(FACE_OF[c]));
+      // Resolve wants column f to be face f; shot k's cluster belongs to face faceOf[k].
+      const cols = rows.map(r => {
+        const out = new Array(6);
+        for (let k = 0; k < 6; k++) out[faceOf[k]] = r[k];
+        return out;
+      });
+      const turned = [];
+      for (let k = 0; k < 6; k++) {
+        const nine = cols.slice(k * 9, k * 9 + 9);
+        turned.push([0, 1, 2, 3].map(q => turnNine(nine, q)));
+      }
+      const cost = new Array(54);
+      const q = [0, 0, 0, 0, 0, 0];
+      for (let code = 0; code < 4096; code++) {
+        for (let k = 0; k < 6; k++) {
+          q[k] = (code >> (2 * k)) & 3;
+          const block = turned[k][q[k]];
+          for (let i = 0; i < 9; i++) cost[faceOf[k] * 9 + i] = block[i];
+        }
+        const total = Resolve.resolve(cost).cost + handicap;
+        if (!best || total < best.total) best = { total, faceOf, turns: q.slice() };
+      }
+    });
+
+    const samples = new Array(54);
+    for (let k = 0; k < 6; k++) {
+      const nine = turnNine(shots[k], best.turns[k]);
+      for (let i = 0; i < 9; i++) samples[best.faceOf[k] * 9 + i] = nine[i];
+    }
+    const read = toState(samples, { turns: false });
+    read.placement = shots.map((_, k) => ({ face: FACE_ORDER[best.faceOf[k]], quarters: best.turns[k] }));
+    return read;
+  }
+
+  /** What centre colour a lone photo shows, judged against the reference colours. */
+  function guessColour(rgb) {
+    const p = feature(rgb);
+    let best = null;
+    for (const c of LETTERS) {
+      const d = dist2(p, featureFromHsv(REFERENCE[c]));
+      if (!best || d < best.d) best = { c, d };
+    }
+    return best.c;
+  }
+
+  /**
+   * Cost of each of the six colours for each sample, under a palette from a
+   * finished read. Lower is better; the columns follow `palette.names`.
+   */
+  function costRows(samples, palette) {
+    return samples.map(rgb => costRow(feature(rgb), palette.seeds, palette.sigma));
   }
 
   const SPOT = ['左上', '上', '右上', '左', '中央', '右', '左下', '下', '右下'];
@@ -418,9 +533,9 @@
       }
     }
     const margin = 8;                   // in brightness levels: a real grid scores far above this
-    if (best.score < base + margin) return { box, moved: false };
+    if (best.score < base + margin) return { box, moved: false, score: base };
     const b = best.box;
-    return { box: { x: Math.round(b.x), y: Math.round(b.y), size: Math.round(b.size) }, moved: true };
+    return { box: { x: Math.round(b.x), y: Math.round(b.y), size: Math.round(b.size) }, moved: true, score: best.score };
   }
 
   /**
@@ -433,7 +548,8 @@
    * @returns {{colours: Array<[number, number, number]>, box: object}}
    */
   function sampleImage(img, box, opts) {
-    const where = (!opts || opts.locate !== false) ? locateGrid(img, box).box : box;
+    const found = (!opts || opts.locate !== false) ? locateGrid(img, box) : { box, score: gridScore(img, box) };
+    const where = found.box;
     const { x, y, size } = where;
     const cell = size / 3;
     const inset = cell * 0.25;            // stay off the sticker edges
@@ -445,7 +561,7 @@
           Math.round(x + c * cell + inset), Math.round(y + r * cell + inset), side, side));
       }
     }
-    return { colours, box: where };
+    return { colours, box: where, score: found.score };
   }
 
   /**
@@ -465,6 +581,6 @@
 
   window.Scan = {
     FACE_ORDER, INSTRUCTIONS, LETTERS,
-    rgbToHsv, feature, toState, describe, sampleFace, sampleImage, locateGrid, frameBox, patchColour,
+    rgbToHsv, feature, toState, toStateAnyOrder, costRows, guessColour, FACE_OF, describe, sampleFace, sampleImage, locateGrid, frameBox, patchColour,
   };
 })();
