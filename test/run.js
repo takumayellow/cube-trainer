@@ -16,6 +16,8 @@
 //   9. Scan: 撮った色（照明のかぶり・ノイズ込み）から元の状態を復元できるか
 //  10. MoveWords: 手の言い方が、白を下・緑を手前に持ったときの実際の動きと一致するか
 //  11. MoveWords: 打ち込んだ手順とキー操作を正しい手に読むか
+//  12. カメラで追う: 面をどの順・どの向きで見せても読めるか、見えない手には面を見せる矢印を出すか、
+//      解き直しの方針（戻させる・最短に切り替える）、完成の確かめ方、CFOP の手のまとまり
 
 'use strict';
 const fs = require('fs');
@@ -24,7 +26,7 @@ const path = require('path');
 // ブラウザ用のファイルをそのまま読み込む（ビルド無しを保つため）
 global.window = global;
 for (const f of ['cube.js', 'cubie.js', 'two-phase.js', 'cfop.js', 'glossary.js',
-                 'search.js', 'algs.js', 'step.js', 'scan.js', 'move-words.js']) {
+                 'search.js', 'algs.js', 'step.js', 'resolve.js', 'scan.js', 'move-words.js']) {
   // eslint-disable-next-line no-eval
   eval(fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8'));
 }
@@ -303,6 +305,70 @@ check('どの案内にも「場所」のヒントがある', noWhere === 0, `${n
 console.log(`      1 回の解に ${(stepCount / runs).toFixed(1)} ステップ・` +
             `${(stepMoves / runs).toFixed(1)} 手 / 1 ステップの探索は最長 ${worstMs} ms`);
 
+// ── 9. 色の読み取り ─────────────────────────────────────────────────────────
+// 実物のキューブを撮った RGB（dwalton76/rubiks-color-resolver の test-data、MIT）。
+const realRgb = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'real-rgb.json'), 'utf8'));
+const faceString = state => {
+  const toFace = {};
+  for (const f of Scan.FACE_ORDER) toFace[state[f][4]] = f;
+  return Scan.FACE_ORDER.map(f => state[f].map(c => toFace[c] || '?').join('')).join('');
+};
+const tint = s => s.map(([r, g, b]) => [Math.min(255, Math.round(r * 1.05)), Math.round(g * 0.85), Math.round(b * 0.6)]);
+let realOk = 0, tintOk = 0, alwaysValid = true;
+for (const c of realRgb.cases) {
+  const a = Scan.toState(c.samples);
+  const b = Scan.toState(tint(c.samples));
+  if (faceString(a.state) === c.expect) realOk++;
+  if (faceString(b.state) === c.expect) tintOk++;
+  alwaysValid = alwaysValid && Cubie.validate(a.state).ok && Cubie.validate(b.state).ok;
+}
+check(`実物の RGB を全部正しく読む（${realOk}/${realRgb.cases.length}）`, realOk === realRgb.cases.length);
+check(`電球色のかぶりでも読む（${tintOk}/${realRgb.cases.length}）`, tintOk === realRgb.cases.length);
+check('読んだ結果は必ず実在しうる状態になる', alwaysValid);
+
+// 1 面を 90° 回して撮っても、回したと気づいて直す（見た目が変わる面だけ）
+{
+  const c = realRgb.cases.find(x => x.name === 'random01') || realRgb.cases[realRgb.cases.length - 1];
+  const QUARTER = [6, 3, 0, 7, 4, 1, 8, 5, 2];
+  const turned = c.samples.slice();
+  const R = 9;                                     // R 面
+  for (let i = 0; i < 9; i++) turned[R + i] = c.samples[R + QUARTER[i]];
+  const r = Scan.toState(turned);
+  check('90° 回して撮った面を直す', faceString(r.state) === c.expect && r.rotated.some(x => x.face === 'R'),
+        JSON.stringify(r.rotated));
+}
+
+// わざと 1 マスの色を隣の色に寄せても、ありえる状態の側に直す
+{
+  const c = realRgb.cases[0];
+  const s = c.samples.map(x => x.slice());
+  const centre = { U: 4, R: 13, F: 22, D: 31, L: 40, B: 49 };
+  // 0 番（U 面左上・角のマス）を、別の面の中心の色に寄せる
+  const other = c.expect[0] === 'U' ? 'F' : 'U';
+  s[0] = s[0].map((v, k) => Math.round(v * 0.45 + s[centre[other]][k] * 0.55));
+  const r = Scan.toState(s);
+  check('取り違えた 1 マスを、駒の制約で直す', faceString(r.state) === c.expect,
+        `corrected=${JSON.stringify(r.corrected)}`);
+}
+
+// 実写（dwalton76/rubiks-cube-tracker の test-data、MIT）。中央の正方形を 360px に縮めたもの。
+// キューブは案内の枠からずれて写っていて、白と黄は露出オーバーでほぼ同じ RGB になっている。
+// 枠を探し直す処理と駒の制約で、安いウェブカメラ相当の解像度まで落としても同じ答えになるか。
+{
+  const png = require('./png.js');
+  const PHOTO = 'LBBUURDDRDDLBRFRBDLLFRFRBLURFFLDLDBLURFULFBUUUDFDBFBUR';   // 同リポジトリの resolver の答え
+  const photos = Scan.FACE_ORDER.map(f => png.decode(path.join(__dirname, 'fixtures', 'photo', `${f}.png`)));
+  for (const size of [360, 240, 120, 90]) {
+    const t0 = Date.now();
+    const samples = photos.flatMap(img => {
+      const im = size === img.width ? img : png.shrink(img, size);
+      return Scan.sampleImage(im, Scan.frameBox(size, size, 0.62)).colours;
+    });
+    const got = faceString(Scan.toState(samples).state);
+    check(`実写を ${size}px 四方で読む（${Date.now() - t0} ms）`, got === PHOTO, got);
+  }
+}
+
 // ── 10. 手の言い方 ──────────────────────────────────────────────────────────
 // 「上の面を左へ」と書いたら、本当に手前の上段が左へ行くか。言葉が逆なら、
 // キューブを初めて持つ人は案内どおりに回して崩すことになる。
@@ -342,6 +408,120 @@ check('キー: Ctrl / Alt / ⌘ 付きと変換中は回さない',
       key('r', { metaKey: true }) === null && key('r', { isComposing: true }) === null);
 check('キー: 面以外の文字は回さない', key('x') === null && key('Enter') === null);
 check('キー: 押しっぱなしのリピートでは回さない', key('r', { repeat: true }) === null);
+
+// ── 12. カメラで追う ────────────────────────────────────────────────────────
+for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js', 'live/view.js']) {
+  // eslint-disable-next-line no-eval
+  eval(fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8'));
+}
+{
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'real-rgb.json'), 'utf8')).cases[0];
+  const ref = Scan.toState(fx.samples).state;
+  const pool = {};
+  Scan.FACE_ORDER.forEach((f, k) => ref[f].forEach((c, i) => { (pool[c] = pool[c] || []).push(fx.samples[k * 9 + i]); }));
+  let seed = 3;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const pick = c => pool[c][Math.floor(rnd() * pool[c].length)];
+  const shoot = (st, f, q) => { const out = new Array(9); for (let i = 0; i < 9; i++) out[Track.TURN[q][i]] = pick(st[f][i]); return out; };
+
+  let readOk = 0;
+  for (let t = 0; t < 10; t++) {
+    const c = new Cube(); c.scramble(20);
+    const r = Reader.create();
+    const order = Scan.FACE_ORDER.slice().sort(() => rnd() - 0.5);
+    for (const f of order) r.offer(shoot(c.getState(), f, Math.floor(rnd() * 4)));
+    const out = r.finish();
+    if (out.ok && Scan.FACE_ORDER.every(f => out.read.state[f].join() === c.getState()[f].join())) readOk++;
+  }
+  check('読み取り: 面の順番と向きがばらばらでも元の状態を復元する', readOk === 10, `${readOk}/10`);
+
+  // U turned while the camera looks at U from... the U face itself is visible: spin.
+  const s0 = solved();
+  check('矢印: 正面の面の手は回転の矢印', Track.arrowFor('F', 'F', 0, s0).kind === 'spin' || Track.arrowFor('F', 'F', 0, s0).kind === 'show');
+  const mixed = after("R U F' L2 D B'").getState();
+  const spin = Track.arrowFor('F', 'F', 0, mixed);
+  check('矢印: 見えている面の手は spin', spin.kind === 'spin' && spin.dir === 'cw' && !spin.twice);
+  check('矢印: 180° は二重の矢じり', Track.arrowFor('F2', 'F', 0, mixed).twice === true);
+  // On a solved cube, U only moves the top rows of the side faces; looking at
+  // U itself, nothing changes, so the player must be shown a side.
+  const sh = Track.arrowFor('U', 'U', 0, s0);
+  check('矢印: 当てても見た目の変わらない面では、変わる面を見せる', sh.kind === 'show' && sh.face !== 'U' && sh.face !== 'D', JSON.stringify(sh));
+
+  // Policy: plan solves; a stray turn is first asked back.
+  const st = after("R U R' F2 D L'").getState();
+  const pol = Policy.create(st, { mode: 'shortest' });
+  check('方針: 最短手順は当てると完成する', after(pol.plan, st).isSolved(), pol.plan.join(' '));
+  const want = pol.plan[0];
+  const strayMove = ['U', 'D', 'R', 'L', 'F', 'B'].find(l => l !== want[0] && Track.OPPOSITE[l] !== want[0]);
+  const st2 = after([strayMove], st).getState();
+  pol.saw([strayMove], st2);
+  check('方針: 違う手を 1 回回したら、まずその手を戻させる',
+        pol.note.kind === 'undo' || pol.note.kind === 'adjust', pol.note.kind);
+  check('方針: 立て直した手順も当てると完成する', after(pol.plan, st2).isSolved());
+  const solvedPol = Policy.create(s0, { mode: 'shortest' });
+  check('方針: 完成した状態では手順なし', solvedPol.plan.length === 0 && solvedPol.note.kind === 'solved');
+
+  const steps = Policy.create(st, { mode: 'steps' });
+  check('方針: CFOP モードは段階名つきの手順を返す', steps.plan.length > 0 && !!steps.job && !!steps.job.stage);
+
+  const seen = new Set();
+  let face = 'F', q = 0, hops = 0;
+  for (let nx = Policy.checkNext(face, q, seen); nx; nx = Policy.checkNext(face, q, seen)) {
+    seen.add(face);
+    if (seen.size >= Policy.CHECK_FACES) break;
+    face = nx.target; hops++;
+    if (hops > 10) break;
+  }
+  check(`完成の確認: ${Policy.CHECK_FACES} 面を確かめると終わる`, seen.size === Policy.CHECK_FACES && hops < 10, `${seen.size}`);
+
+  check('CFOP: セクシームーブを 1 まとまりとして見つける',
+        JSON.stringify(Learn.groups(['F', 'R', 'U', "R'", "U'", "F'"])) === JSON.stringify([{ from: 1, to: 5, name: 'セクシームーブ' }]));
+  check('CFOP: 長いまとまりを優先する', Learn.groups(['R', 'U', "R'", "U'"])[0].to === 4);
+  check('CFOP: 名前の無い 3 手のまとまり', Learn.groups(['R', "U'", "R'"])[0].name === '');
+  const lm = Learn.move("R'");
+  check("CFOP: 記号の説明（R' = 右の面を反時計回り）", lm.face.includes('右') && lm.amount.includes('反時計'));
+  const tr = Learn.track([{ key: 'cross', done: true }, { key: 'f2l', done: false }], 'f2l');
+  check('CFOP: 段階の表示（済み・いま・これから）',
+        tr.map(x => x.state).join() === 'done,now,later,later');
+
+  // LiveView: a face is taken once 3 of the last 4 clear reads agree, even
+  // when one of them shakes, and the same view is not taken twice.
+  {
+    const realSample = Scan.sampleImage;
+    const realDoc = global.document;
+    let tick = null;
+    global.document = { createElement: () => ({ getContext: () => ({ drawImage() {}, getImageData: () => ({}) }) }) };
+    const realSet = global.setInterval;
+    global.setInterval = fn => { tick = fn; return 1; };
+    const face = k => Array.from({ length: 9 }, (_, i) => [Math.round(k * 255), 60 + i * 5, 40]);
+    const reads = [];
+    Scan.sampleImage = () => reads.shift();
+    const steady = [];
+    const frames = [];
+    const view = LiveView.create({ videoWidth: 640, videoHeight: 480 }, {
+      onSteady: v => steady.push(v), onGone() {}, onFrame: f => frames.push(f.progress),
+    });
+    view.start();
+    const run = list => { for (const r of list) { reads.push(r); tick(); } };
+    const A = { colours: face(0.1), score: 200, box: {} };
+    const shaky = { colours: face(0.1).map(c => [c[1], c[0], 220]), score: 200, box: {} };
+    const blurred = { colours: face(0.9), score: 110, box: {} };
+    run([A, shaky, A, A]);
+    check('自動読み取り: 4 回中 3 回そろえば、1 回揺れても撮る', steady.length === 1, `${steady.length}`);
+    run([A, A, shaky, A, blurred, A]);
+    check('自動読み取り: 同じ面は 2 回撮らない', steady.length === 1, `${steady.length}`);
+    check('自動読み取り: 撮る前は進み具合が増える', frames[0] > 0 && frames[0] < 1 && frames[3] === 1, frames.slice(0, 4).join());
+    const B = { colours: face(0.6), score: 200, box: {} };
+    run([B, B, B]);
+    check('自動読み取り: 別の面に変わったら撮る', steady.length === 2, `${steady.length}`);
+    run([blurred, blurred, blurred, blurred]);
+    check('自動読み取り: ぼやけた読みは撮影に数えない', steady.length === 2, `${steady.length}`);
+    view.stop();
+    Scan.sampleImage = realSample;
+    global.setInterval = realSet;
+    global.document = realDoc;
+  }
+}
 
 console.log(`\n2 フェーズ法: 平均 ${(tpLen / (trials - tpFail)).toFixed(1)} 手 / 最大 ${tpMax} 手 / ` +
             `${((Date.now() - tpStart) / trials).toFixed(1)} ms per solve`);

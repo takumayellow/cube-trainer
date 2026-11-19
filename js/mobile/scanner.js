@@ -7,7 +7,8 @@
  * camera.js samples, so lining the cube up with it is all the aiming there is.
  *
  * After the sixth face nothing is solved yet. The read cube is shown with the
- * close calls ringed in red; tapping a sticker and then a colour fixes it, and
+ * close calls ringed in red and the stickers inferred from the pieces ringed
+ * in orange, with a sentence for each kind; tapping a sticker and then a colour fixes it, and
  * only a cube that can physically exist can be handed to the coach.
  *
  * 「手で塗る」 skips the camera and opens the same review on the cube as it is
@@ -30,6 +31,11 @@
   let shots = [];                  // nine RGB samples per captured face
   let state = null;                // the cube under review
   let flagged = [];
+  let fixed = [];                  // stickers whose colour came from the pieces, not the pixels
+  let notes = [];                  // Scan.describe of the last read
+  let busy = false;                // a burst of frames is being taken
+  let liveTimer = null;
+  let mirrored = false;
   let selected = null;
   let painted = false;             // review opened by 「手で塗る」 rather than the camera
   let message = '';
@@ -59,14 +65,31 @@
     video.srcObject = s;
     try { await video.play(); } catch { /* autoplay refused: the first tap starts it */ }
     if (mine !== token) return;
+    mirrored = Camera.isMirrored(s);
     live = true;
     draw();
+    liveTimer = setInterval(showLive, 250);
+  }
+
+  /** What would be read right now, as a dot in each guide cell. */
+  function showLive() {
+    if (!live || busy || !video || !video.videoWidth || !root) return;
+    const cells = root.querySelectorAll('.cam-guide i b');
+    if (cells.length !== 9) return;
+    const colours = Camera.sampleSquare(video, video.videoWidth, video.videoHeight, FILL);
+    colours.forEach((rgb, i) => {
+      const col = i % 3, row = Math.floor(i / 3);
+      cells[mirrored ? row * 3 + (2 - col) : i].style.background = `rgb(${rgb.join(',')})`;
+    });
   }
 
   /** Release the camera. A preview left running keeps the light on. */
   function stopCamera() {
     token += 1;
     live = false;
+    busy = false;
+    if (liveTimer) clearInterval(liveTimer);
+    liveTimer = null;
     if (stream) stream.getTracks().forEach(t => t.stop());
     stream = null;
     if (video) video.srcObject = null;
@@ -79,8 +102,8 @@
 
   // ── capture ───────────────────────────────────────────────────────────────
 
-  function take(source, width, height) {
-    shots = shots.concat([Camera.sampleSquare(source, width, height, FILL)]);
+  function take(colours) {
+    shots = shots.concat([colours]);
     message = '';
     if (shots.length === 6) finish();
     else draw();
@@ -91,7 +114,19 @@
       fail('カメラの映像がまだ届いていません。少し待つか、「写真から」を使ってください。');
       return;
     }
-    take(video, video.videoWidth, video.videoHeight);
+    if (busy) return;
+    busy = true;
+    draw();
+    const mine = token;
+    Camera.sampleBurst(video, Camera.BURST, FILL).then(colours => {
+      if (mine !== token) return;            // left the tab mid-burst
+      busy = false;
+      take(colours);
+    }, () => {
+      if (mine !== token) return;
+      busy = false;
+      fail('カメラの映像が途切れました。もう一度撮ってください。');
+    });
   }
 
   function pickFile(input) {
@@ -99,7 +134,7 @@
     input.value = '';                     // the same file twice must still fire
     if (!file) return;
     Camera.loadImage(file).then(
-      img => take(img, img.naturalWidth, img.naturalHeight),
+      img => take(Camera.sampleSquare(img, img.naturalWidth, img.naturalHeight, FILL)),
       () => fail('画像を読み込めませんでした。別のファイルを試してください。'));
   }
 
@@ -115,6 +150,8 @@
     stopCamera();
     state = read.state;
     flagged = read.uncertain;
+    fixed = read.corrected;
+    notes = Scan.describe(read);
     selected = null;
     painted = false;
     phase = 'review';
@@ -125,6 +162,8 @@
     stopCamera();
     state = Store.state;
     flagged = [];
+    fixed = [];
+    notes = [];
     selected = null;
     painted = true;
     message = '';
@@ -136,6 +175,8 @@
     shots = [];
     state = null;
     flagged = [];
+    fixed = [];
+    notes = [];
     selected = null;
     message = '';
     phase = 'shoot';
@@ -156,7 +197,9 @@
     if (!selected) return;
     const { face, index } = selected;
     state = { ...state, [face]: state[face].map((c, i) => (i === index ? colour : c)) };
-    flagged = flagged.filter(s => !(s.face === face && s.index === index));
+    const other = s => !(s.face === face && s.index === index);
+    flagged = flagged.filter(other);
+    fixed = fixed.filter(other);
     selected = null;
     draw();
   }
@@ -183,9 +226,15 @@
     const face = Scan.FACE_ORDER[shots.length];
     const info = Scan.INSTRUCTIONS[face];
     root.appendChild(header('読み取り', 'カメラで 6 面を撮る'));
+    const alt = el('p', 'note');
+    alt.append('撮影ボタンを使わず、カメラを向けたまま解き方まで案内する ');
+    const link = el('a', '', 'カメラで追いかける版');
+    link.href = 'live.html';
+    alt.append(link, ' もあります。');
+    root.appendChild(alt);
     root.appendChild(faceChips());
 
-    const stage = el('div', 'cam' + (live ? '' : ' off'));
+    const stage = el('div', 'cam' + (live ? '' : ' off') + (mirrored ? ' mirror' : ''));
     if (!video) {
       video = document.createElement('video');
       video.playsInline = true;
@@ -195,11 +244,15 @@
     stage.appendChild(video);
     const guide = el('div', 'cam-guide');
     guide.style.inset = `${((1 - FILL) / 2) * 100}%`;
-    for (let i = 0; i < 9; i++) guide.appendChild(el('i'));
+    for (let i = 0; i < 9; i++) {
+      const cell = el('i');
+      cell.appendChild(el('b'));
+      guide.appendChild(cell);
+    }
     stage.appendChild(guide);
     if (!live) stage.appendChild(el('p', 'cam-off', 'カメラ待ち'));
     root.appendChild(stage);
-    root.appendChild(el('p', 'note center', '枠の中がそのまま読み取り範囲です'));
+    root.appendChild(el('p', 'note center', '枠にだいたい合わせれば、枠の近くからキューブを探して読みます'));
 
     root.appendChild(el('p', 'cam-step', `${shots.length + 1} / 6 面目 · ${info.title}`));
     root.appendChild(el('p', 'cam-hold', info.hold));
@@ -217,7 +270,7 @@
     shutter.type = 'button';
     shutter.id = 'shutter';
     shutter.setAttribute('aria-label', '撮る');
-    shutter.disabled = !live;
+    shutter.disabled = !live || busy;
     shutter.addEventListener('click', shoot);
     row.append(button('写真から', 'small', () => file.click()), shutter,
                button('手で塗る', 'small', paintByHand));
@@ -244,12 +297,14 @@
 
   function drawReview() {
     const verdict = Cubie.validate(state);
+    const check = flagged.length + fixed.length;
     const title = painted ? '手で塗る'
-      : flagged.length ? `読み取り完了 · ${flagged.length} マスが際どい` : '読み取り完了 · 問題なし';
-    root.appendChild(header(title, painted ? 'マスを選んで色を押す' : '赤い枠のマスを確かめてください'));
+      : check ? `読み取り完了 · ${check} マスを確かめて` : '読み取り完了 · 問題なし';
+    root.appendChild(header(title, painted ? 'マスを選んで色を押す' : '枠の付いたマスを実物と見比べてください'));
+    for (const line of painted ? [] : notes) root.appendChild(el('p', 'note', line));
 
     root.appendChild(faceNet(state, {
-      size: 78, flagged, selected,
+      size: 78, flagged, fixed, selected,
       onCell: (face, index) => {
         if (index === CENTRES) return;      // centres fix the colour scheme; they never move
         selected = { face, index };
@@ -284,6 +339,16 @@
   }
 
   // ── tab life cycle ────────────────────────────────────────────────────────
+
+  // Leaving the page (another tab, the home screen) turns the camera off;
+  // coming back to the shooting step turns it on again.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (stream || live) { stopCamera(); if (root) draw(); }
+    } else if (root && phase === 'shoot' && !stream) {
+      startCamera();
+    }
+  });
 
   window.Scanner = {
     mount(node) {

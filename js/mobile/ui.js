@@ -32,12 +32,14 @@
    * @param {Array}  [o.highlight]  stickers to ring
    * @param {boolean}[o.dim]        fade everything not highlighted
    * @param {Array}  [o.flagged]    stickers to ring in red (doubtful reads)
+   * @param {Array}  [o.fixed]      stickers to ring in orange (inferred from the pieces)
    * @param {object} [o.selected]   one sticker picked for repainting
    * @param {function(string, number): void} [o.onCell]
    */
   function faceNet(state, o = {}) {
     const marked = new Set((o.highlight || []).map(key));
     const flagged = new Set((o.flagged || []).map(key));
+    const fixed = new Set((o.fixed || []).map(key));
     const picked = o.selected ? key(o.selected) : null;
 
     const net = el('div', 'fnet');
@@ -56,6 +58,7 @@
         const id = `${face}${i}`;
         if (marked.has(id)) cell.classList.add('hl');
         if (flagged.has(id)) cell.classList.add('flag');
+        if (fixed.has(id)) cell.classList.add('fix');
         if (picked === id) cell.classList.add('sel');
         cell.dataset.face = face;
         cell.dataset.index = String(i);

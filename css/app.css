@@ -359,7 +359,10 @@ button.chip { cursor: pointer; }
   box-shadow: 0 0 0 999px rgba(0, 0, 0, .35);
   pointer-events: none;
 }
-.cam-guide i { border: 1px solid rgba(255, 255, 255, .45); }
+.cam-guide i { border: 1px solid rgba(255, 255, 255, .45); display: grid; place-items: center; }
+.cam-guide i b { width: 22%; aspect-ratio: 1 / 1; border-radius: 50%; border: 2px solid rgba(0, 0, 0, .6); }
+.cam.mirror video { transform: scaleX(-1); }
+.st.fix { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px #f0a020; position: relative; z-index: 1; }
 .cam-off { position: absolute; left: 0; right: 0; bottom: 10px; text-align: center; color: var(--dim); font-size: 12px; }
 .cam-step { font-weight: 700; }
 .cam-hold { color: var(--dim); font-size: 13px; margin-top: -8px; }

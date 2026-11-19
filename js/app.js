@@ -21,7 +21,6 @@
   const SCRAMBLE_LEN = 25;
   const PER_FACE = 9;
   // Where a sticker sits on its face, for talking about a doubtful colour.
-  const SPOT = ['左上', '上', '右上', '左', '中央', '右', '左下', '下', '右下'];
 
   const cube = new Cube();
   const history = [];
@@ -416,23 +415,15 @@
    * cheapest fix for a misread orange is one click — far cheaper than a solve
    * that quietly answers for a cube nobody is holding.
    */
-  function takeScan(state, uncertain) {
+  function takeScan(read) {
     closeCamera();
-    mutate(() => cube.setState(state));
+    mutate(() => cube.setState(read.state));
 
     const note = $('scan-note');
-    const verdict = Cubie.validate(state);
-    if (!verdict.ok) {
-      note.textContent = '読み取った色ではキューブとして成立しません。展開図で塗り直してください。';
-    } else if (uncertain.length) {
-      const spots = uncertain.map(u => `${u.face} 面の${SPOT[u.index]}`).join('、');
-      note.textContent = `読み取りました。色に自信がないマスが ${uncertain.length} 個あります: ${spots}。`
-        + '実物と見比べて、違っていれば塗り直してください。';
-    } else {
-      note.textContent = '読み取りました。実物と見比べて、違っていれば塗り直してください。';
-    }
+    const notes = Scan.describe(read);
+    note.textContent = ['読み取りました。', ...notes, '実物と見比べて、違っていれば展開図で塗り直してください。'].join('');
     note.hidden = false;
-    if (!verdict.ok || uncertain.length) setPaint(true);
+    if (read.uncertain.length || read.corrected.length) setPaint(true);
   }
 
   function setMode(next) {

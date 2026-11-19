@@ -214,7 +214,7 @@ kbd {
    square of the frame — the same square the colours are read from. */
 .cam-stage {
   position: relative;
-  width: min(100%, 320px);
+  width: min(100%, 420px);
   aspect-ratio: 1 / 1;
   background: #000;
   border-radius: 8px;
@@ -233,7 +233,12 @@ kbd {
   grid-template-rows: repeat(3, 1fr);
   pointer-events: none;
 }
-.cam-cell { border: 1px solid rgba(255, 255, 255, 0.85); }
+.cam-cell { border: 1px solid rgba(255, 255, 255, 0.85); display: grid; place-items: center; }
+/* What would be read right now: a dot of the sampled colour in each cell. */
+.cam-dot { width: 22%; aspect-ratio: 1 / 1; border-radius: 50%; border: 2px solid rgba(0, 0, 0, 0.6); }
+.cam-dot:not([style]) { display: none; }
+/* A camera facing the user is shown as a mirror; the guide is symmetric. */
+.cam-stage.mirror video, .cam.mirror video { transform: scaleX(-1); }
 
 /* ── the panel ───────────────────────────────────────────────────────────── */
 
