@@ -466,76 +466,120 @@
   }
 
   /**
+   * A point on the face, in cell units (0..3 across, 0..3 down), mapped into
+   * the image. `box.angle` (radians, default 0) turns the grid about its centre,
+   * for a cube held a little crooked.
+   */
+  function gridPoint(box, u, v) {
+    const cell = box.size / 3;
+    const a = box.angle || 0;
+    const cx = box.x + box.size / 2, cy = box.y + box.size / 2;
+    const px = (u - 1.5) * cell, py = (v - 1.5) * cell;
+    return [cx + px * Math.cos(a) - py * Math.sin(a), cy + px * Math.sin(a) + py * Math.cos(a)];
+  }
+
+  /**
    * How much `box` looks like a 3x3 cube face: bright, even sticker cores
    * against dark lines where the gaps between stickers should be.
    */
   function gridScore(img, box) {
-    const { x, y, size } = box;
-    const cell = size / 3;
-    let core = 0, coreN = 0, spread = 0, gap = 0, gapN = 0;
+    let core = 0, spread = 0, gap = 0, gapN = 0;
     const N = 4;                                   // samples per cell side
     for (let r = 0; r < 3; r++) {
       for (let c = 0; c < 3; c++) {
         const vals = [];
         for (let i = 0; i < N; i++) {
           for (let j = 0; j < N; j++) {
-            vals.push(peak(img, x + (c + 0.3 + 0.4 * j / (N - 1)) * cell,
-                                y + (r + 0.3 + 0.4 * i / (N - 1)) * cell));
+            const [px, py] = gridPoint(box, c + 0.3 + 0.4 * j / (N - 1), r + 0.3 + 0.4 * i / (N - 1));
+            vals.push(peak(img, px, py));
           }
         }
         const m = vals.reduce((a, b) => a + b, 0) / vals.length;
-        core += m; coreN += 1;
+        core += m;
         spread += Math.sqrt(vals.reduce((a, v) => a + (v - m) * (v - m), 0) / vals.length);
       }
     }
     // the two inner lines each way, sampled along their length
     for (const k of [1, 2]) {
       for (let t = 0.1; t < 3; t += 0.2) {
-        gap += peak(img, x + k * cell, y + t * cell) + peak(img, x + t * cell, y + k * cell);
+        const [ax, ay] = gridPoint(box, k, t);
+        const [bx, by] = gridPoint(box, t, k);
+        gap += peak(img, ax, ay) + peak(img, bx, by);
         gapN += 2;
       }
     }
-    return core / coreN - gap / gapN - spread / coreN;
+    return core / 9 - gap / gapN - spread / 9;
   }
 
+  const DEG = Math.PI / 180;
+
   /**
-   * Nudge the guide square onto the cube actually in the picture. People do
-   * not hold a cube exactly in the guide, and a low-resolution camera cannot
-   * spare the pixels lost when every sample sits a little off-centre. Tries
-   * sizes and offsets around `box` and keeps the one that looks most like a
-   * 3x3 grid — but only when it is clearly better than the guide as drawn.
+   * Find the cube actually in the picture. People do not hold a cube exactly
+   * in the guide — it sits off to one side, nearer or farther, a little
+   * crooked — so this tries sizes, offsets and small turns around `box` and
+   * keeps the one that looks most like a 3x3 grid, but only when it is
+   * clearly better than the guide as drawn.
    */
   function locateGrid(img, box) {
     const base = gridScore(img, box);
-    let best = { box, score: base };
     const cx0 = box.x + box.size / 2, cy0 = box.y + box.size / 2;
-    const tryBox = (size, cx, cy) => {
-      const b = { x: cx - size / 2, y: cy - size / 2, size };
-      if (b.x < 0 || b.y < 0 || b.x + size > img.width || b.y + size > img.height) return;
-      const sc = gridScore(img, b);
-      if (sc > best.score) best = { box: b, score: sc };
+    const score = (size, cx, cy, angle) => {
+      // the turned square must stay in the picture
+      const reach = size * (Math.abs(Math.cos(angle)) + Math.abs(Math.sin(angle))) / 2;
+      if (cx - reach < 0 || cy - reach < 0 || cx + reach > img.width || cy + reach > img.height) return -Infinity;
+      return gridScore(img, { x: cx - size / 2, y: cy - size / 2, size, angle });
     };
-    // coarse: sizes 55%..115% of the guide, centre within a third of it
-    for (let k = 0.55; k <= 1.151; k += 0.05) {
-      const size = box.size * k;
-      for (let dy = -0.3; dy <= 0.301; dy += 0.05) {
-        for (let dx = -0.3; dx <= 0.301; dx += 0.05) tryBox(size, cx0 + dx * box.size, cy0 + dy * box.size);
+    // coarse: sizes 45%..130% of the guide, centre within 45% of it, turned up
+    // to 15°; keep the few best, as the right answer can sit between two steps
+    // The offset step follows the size tried (a third of a cell), so a small,
+    // far-off cube is searched as finely as a near one. The few best are kept
+    // only when they sit apart, so one wrong peak cannot crowd out the right one.
+    const TOP = 6;
+    const reach = box.size * 0.45;
+    let top = [];
+    const keep = cand => {
+      const near = top.findIndex(t => Math.hypot(t.cx - cand.cx, t.cy - cand.cy) < Math.min(t.size, cand.size) / 6);
+      if (near >= 0) {
+        if (top[near].score >= cand.score) return;
+        top = top.filter((_, i) => i !== near);
       }
-    }
-    // fine: around the coarse winner
-    const c = best.box;
-    const ccx = c.x + c.size / 2, ccy = c.y + c.size / 2;
-    for (let k = -0.04; k <= 0.041; k += 0.02) {
-      for (let dy = -0.025; dy <= 0.026; dy += 0.0125) {
-        for (let dx = -0.025; dx <= 0.026; dx += 0.0125) {
-          tryBox(c.size * (1 + k), ccx + dx * box.size, ccy + dy * box.size);
+      top = [...top, cand].sort((p, q) => q.score - p.score).slice(0, TOP);
+    };
+    for (const deg of [0, -10, 10]) {
+      for (let k = 0.45; k <= 1.301; k += 0.06) {
+        const size = box.size * k;
+        const step = Math.max(2, size / 9);
+        for (let dy = -reach; dy <= reach + 0.01; dy += step) {
+          for (let dx = -reach; dx <= reach + 0.01; dx += step) {
+            const cand = { size, cx: cx0 + dx, cy: cy0 + dy, angle: deg * DEG };
+            cand.score = score(cand.size, cand.cx, cand.cy, cand.angle);
+            if (top.length < TOP || cand.score > top[top.length - 1].score) keep(cand);
+          }
         }
       }
     }
+    // fine: climb from each, halving the step until it stops paying
+    let best = { score: base };
+    for (const start of top) {
+      let cur = start;
+      for (let step = start.size / 18, turn = 4 * DEG; step >= start.size / 150; step /= 2, turn /= 2) {
+        for (let moved = true; moved;) {
+          moved = false;
+          for (const [ds, dx, dy, da] of [[1, 0, 0, 0], [-1, 0, 0, 0], [0, 1, 0, 0], [0, -1, 0, 0],
+                                          [0, 0, 1, 0], [0, 0, -1, 0], [0, 0, 0, 1], [0, 0, 0, -1]]) {
+            const n = { size: cur.size + ds * step, cx: cur.cx + dx * step, cy: cur.cy + dy * step, angle: cur.angle + da * turn };
+            n.score = score(n.size, n.cx, n.cy, n.angle);
+            if (n.score > cur.score) { cur = n; moved = true; }
+          }
+        }
+      }
+      if (cur.score > best.score) best = cur;
+    }
     const margin = 8;                   // in brightness levels: a real grid scores far above this
-    if (best.score < base + margin) return { box, moved: false, score: base };
-    const b = best.box;
-    return { box: { x: Math.round(b.x), y: Math.round(b.y), size: Math.round(b.size) }, moved: true, score: best.score };
+    if (!best.size || best.score < base + margin) return { box, moved: false, score: base };
+    const b = { x: Math.round(best.cx - best.size / 2), y: Math.round(best.cy - best.size / 2), size: Math.round(best.size) };
+    // a turn under 2° reads the same as none
+    return { box: Math.abs(best.angle) < 2 * DEG ? b : { ...b, angle: best.angle }, moved: true, score: best.score };
   }
 
   /**
@@ -545,20 +589,23 @@
    * @param {{x: number, y: number, size: number}} box the guide square
    * @param {{locate?: boolean}} [opts] locate (default true): look for the
    *   cube near the guide instead of trusting it
-   * @returns {{colours: Array<[number, number, number]>, box: object}}
+   * @returns {{colours: Array<[number, number, number]>, box: object, score: number}}
+   *   `box` may carry `angle` (radians) when the cube was found turned
    */
   function sampleImage(img, box, opts) {
     const found = (!opts || opts.locate !== false) ? locateGrid(img, box) : { box, score: gridScore(img, box) };
     const where = found.box;
-    const { x, y, size } = where;
-    const cell = size / 3;
-    const inset = cell * 0.25;            // stay off the sticker edges
-    const side = Math.max(1, Math.round(cell - inset * 2));
+    const cell = where.size / 3;
+    // a square patch round each sticker centre, small enough to stay on the
+    // sticker when the grid is turned
+    const side = Math.max(1, Math.round(cell * (where.angle ? 0.42 : 0.5)));
     const colours = [];
     for (let r = 0; r < 3; r++) {
       for (let c = 0; c < 3; c++) {
-        colours.push(patchColour(img.data, img.width,
-          Math.round(x + c * cell + inset), Math.round(y + r * cell + inset), side, side));
+        const [px, py] = gridPoint(where, c + 0.5, r + 0.5);
+        const x0 = Math.min(img.width - side, Math.max(0, Math.round(px - side / 2)));
+        const y0 = Math.min(img.height - side, Math.max(0, Math.round(py - side / 2)));
+        colours.push(patchColour(img.data, img.width, x0, y0, side, side));
       }
     }
     return { colours, box: where, score: found.score };
@@ -581,6 +628,6 @@
 
   window.Scan = {
     FACE_ORDER, INSTRUCTIONS, LETTERS,
-    rgbToHsv, feature, toState, toStateAnyOrder, costRows, guessColour, FACE_OF, describe, sampleFace, sampleImage, locateGrid, frameBox, patchColour,
+    rgbToHsv, feature, toState, toStateAnyOrder, costRows, guessColour, FACE_OF, describe, sampleFace, sampleImage, locateGrid, gridPoint, frameBox, patchColour,
   };
 })();

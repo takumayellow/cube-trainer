@@ -372,7 +372,8 @@
       Overlay.grid(c, LiveView.guide, frame.size, 'idle');
       return;
     }
-    Overlay.grid(c, frame.box, frame.size, 'seen');
+    const taking = phase === 'reading' ? frame.progress : 0;
+    Overlay.grid(c, frame.box, frame.size, taking >= 1 ? 'steady' : 'seen', taking);
     if (phase === 'reading' && wholeHint) Overlay.whole(c, frame.box, frame.size, wholeHint);
     if (phase === 'checking' && seen) {
       const nx = Policy.checkNext(seen.face, seen.quarters, checked);

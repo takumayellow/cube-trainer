@@ -410,7 +410,7 @@ check('キー: 面以外の文字は回さない', key('x') === null && key('Ent
 check('キー: 押しっぱなしのリピートでは回さない', key('r', { repeat: true }) === null);
 
 // ── 12. カメラで追う ────────────────────────────────────────────────────────
-for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js']) {
+for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js', 'live/view.js']) {
   // eslint-disable-next-line no-eval
   eval(fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8'));
 }
@@ -483,6 +483,44 @@ for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js'
   const tr = Learn.track([{ key: 'cross', done: true }, { key: 'f2l', done: false }], 'f2l');
   check('CFOP: 段階の表示（済み・いま・これから）',
         tr.map(x => x.state).join() === 'done,now,later,later');
+
+  // LiveView: a face is taken once 3 of the last 4 clear reads agree, even
+  // when one of them shakes, and the same view is not taken twice.
+  {
+    const realSample = Scan.sampleImage;
+    const realDoc = global.document;
+    let tick = null;
+    global.document = { createElement: () => ({ getContext: () => ({ drawImage() {}, getImageData: () => ({}) }) }) };
+    const realSet = global.setInterval;
+    global.setInterval = fn => { tick = fn; return 1; };
+    const face = k => Array.from({ length: 9 }, (_, i) => [Math.round(k * 255), 60 + i * 5, 40]);
+    const reads = [];
+    Scan.sampleImage = () => reads.shift();
+    const steady = [];
+    const frames = [];
+    const view = LiveView.create({ videoWidth: 640, videoHeight: 480 }, {
+      onSteady: v => steady.push(v), onGone() {}, onFrame: f => frames.push(f.progress),
+    });
+    view.start();
+    const run = list => { for (const r of list) { reads.push(r); tick(); } };
+    const A = { colours: face(0.1), score: 200, box: {} };
+    const shaky = { colours: face(0.1).map(c => [c[1], c[0], 220]), score: 200, box: {} };
+    const blurred = { colours: face(0.9), score: 110, box: {} };
+    run([A, shaky, A, A]);
+    check('自動読み取り: 4 回中 3 回そろえば、1 回揺れても撮る', steady.length === 1, `${steady.length}`);
+    run([A, A, shaky, A, blurred, A]);
+    check('自動読み取り: 同じ面は 2 回撮らない', steady.length === 1, `${steady.length}`);
+    check('自動読み取り: 撮る前は進み具合が増える', frames[0] > 0 && frames[0] < 1 && frames[3] === 1, frames.slice(0, 4).join());
+    const B = { colours: face(0.6), score: 200, box: {} };
+    run([B, B, B]);
+    check('自動読み取り: 別の面に変わったら撮る', steady.length === 2, `${steady.length}`);
+    run([blurred, blurred, blurred, blurred]);
+    check('自動読み取り: ぼやけた読みは撮影に数えない', steady.length === 2, `${steady.length}`);
+    view.stop();
+    Scan.sampleImage = realSample;
+    global.setInterval = realSet;
+    global.document = realDoc;
+  }
 }
 
 console.log(`\n2 フェーズ法: 平均 ${(tpLen / (trials - tpFail)).toFixed(1)} 手 / 最大 ${tpMax} 手 / ` +

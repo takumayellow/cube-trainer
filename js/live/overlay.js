@@ -72,22 +72,38 @@
     canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
   }
 
-  /** The 3×3 outline where the face was found; `state` 'seen' | 'steady' | 'idle'. */
-  function grid(canvas, box, size, state) {
+  /**
+   * The 3×3 outline where the face was found; `state` 'seen' | 'steady' | 'idle'.
+   * `progress` (0..1) fills a bar under it while a view is about to be taken.
+   */
+  function grid(canvas, box, size, state, progress) {
     const ctx = canvas.getContext('2d');
     const b = place(canvas, box, size);
+    ctx.save();
+    // the outline follows the cube when it is held a little crooked
+    ctx.translate(b.x + b.s / 2, b.y + b.s / 2);
+    ctx.rotate(box.angle || 0);
+    ctx.translate(-b.s / 2, -b.s / 2);
     ctx.strokeStyle = state === 'steady' ? OK : state === 'seen' ? '#fff' : DIM;
     ctx.lineWidth = state === 'idle' ? 2 : 3;
     ctx.setLineDash(state === 'idle' ? [8, 8] : []);
     for (let k = 0; k <= 3; k++) {
       ctx.beginPath();
-      ctx.moveTo(b.x + (b.s * k) / 3, b.y);
-      ctx.lineTo(b.x + (b.s * k) / 3, b.y + b.s);
-      ctx.moveTo(b.x, b.y + (b.s * k) / 3);
-      ctx.lineTo(b.x + b.s, b.y + (b.s * k) / 3);
+      ctx.moveTo((b.s * k) / 3, 0);
+      ctx.lineTo((b.s * k) / 3, b.s);
+      ctx.moveTo(0, (b.s * k) / 3);
+      ctx.lineTo(b.s, (b.s * k) / 3);
       ctx.stroke();
     }
     ctx.setLineDash([]);
+    if (progress > 0) {
+      const h = Math.max(6, b.s / 24);
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(0, b.s + h, b.s, h);
+      ctx.fillStyle = OK;
+      ctx.fillRect(0, b.s + h, b.s * progress, h);
+    }
+    ctx.restore();
   }
 
   /** One layer turn, as Track.arrowFor describes it (kinds 'slide' and 'spin'). */
