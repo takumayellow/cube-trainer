@@ -15,14 +15,15 @@
 
 (function () {
   const TICK = 150;          // ms between reads
-  const SIZE = 240;          // px the centre square is read at (about 7 ms a read)
+  const SIZE = 240;          // px the centre square is read at (about 35 ms a read)
   const FILL = 0.62;         // guide square, as a fraction of the preview
-  // Measured on the photo fixtures moved about as a hand holds them (shifted,
-  // nearer, farther, turned 12°): the right grid scores 128..227, median 212;
-  // a grid one cell off scores 62..178, median 142. Hand shake moves a sticker
-  // by up to 0.009; another face differs by more than 0.5.
-  const GRID_MIN = 80;       // a face is in view (clutter scores < 40)
-  const TAKE_MIN = 140;      // a read clear enough to take
+  // Grid scores measured at SIZE: the photo fixtures (stickers on black
+  // plastic) score 424..537, and 218..309 one cell off; webcam frames of a
+  // stickerless cube held up to the camera score 140..260, a face or the room
+  // with no cube at most 78. Hand shake moves a sticker by up to 0.009;
+  // another face differs by more than 0.5.
+  const GRID_MIN = 100;      // a face is in view
+  const TAKE_MIN = 130;      // a read clear enough to take
   const STEADY_TICKS = 4;    // reads looked at
   const STEADY_NEED = 3;     // of them, how many must agree: 0.45 s when nothing shakes
   const STEADY_D = 0.015;    // largest per-sticker change between agreeing reads

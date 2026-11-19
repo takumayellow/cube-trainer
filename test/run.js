@@ -521,6 +521,56 @@ for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js'
     global.setInterval = realSet;
     global.document = realDoc;
   }
+
+  // A stickerless cube: the pieces touch, with only a faint line between them,
+  // so nothing dark marks the grid. Webcam-dim colours, held off the guide and
+  // a little crooked in front of a pale wall and a hand. It must still be found
+  // and read; a head in front of the wall, with no cube, must not count.
+  {
+    const S = LiveView.SIZE;
+    const TILE = { W: [205, 205, 198], Y: [200, 188, 40], O: [222, 112, 32], R: [150, 34, 30], G: [22, 128, 62], B: [12, 62, 140] };
+    const FACE = ['R', 'G', 'B', 'O', 'Y', 'W', 'Y', 'R', 'G'];
+    const picture = paint => {
+      const data = new Uint8ClampedArray(S * S * 4);
+      let seed = 7;
+      for (let y = 0; y < S; y++) {
+        for (let x = 0; x < S; x++) {
+          let c = [214 - y / 8, 208 - y / 8, 196 - y / 8];                    // wall, darker lower down
+          if (y > 190 && x > 40 && x < 210) c = [216, 168, 138];              // a hand below
+          c = paint(x, y) || c;
+          seed = (seed * 1103515245 + 12345) % 2147483648;
+          const n = (seed / 2147483648 - 0.5) * 16;                           // sensor noise
+          const p = (y * S + x) * 4;
+          data[p] = c[0] + n; data[p + 1] = c[1] + n; data[p + 2] = c[2] + n; data[p + 3] = 255;
+        }
+      }
+      return { width: S, height: S, data };
+    };
+    const at = { cx: 134, cy: 110, size: 118, angle: 8 * Math.PI / 180 };
+    const cube = picture((x, y) => {
+      const dx = x - at.cx, dy = y - at.cy;
+      const u = (dx * Math.cos(at.angle) + dy * Math.sin(at.angle)) / at.size * 3 + 1.5;
+      const v = (-dx * Math.sin(at.angle) + dy * Math.cos(at.angle)) / at.size * 3 + 1.5;
+      if (u < 0 || v < 0 || u >= 3 || v >= 3) return null;
+      const seam = Math.min(u % 1, 1 - u % 1, v % 1, 1 - v % 1) < 0.03 ? 0.85 : 1;
+      return TILE[FACE[Math.floor(v) * 3 + Math.floor(u)]].map(k => k * seam);
+    });
+    const got = Scan.sampleImage(cube, LiveView.guide);
+    const nearest = rgb => Object.keys(TILE).reduce((best, k) =>
+      Math.hypot(...rgb.map((c, i) => c - TILE[k][i])) < Math.hypot(...rgb.map((c, i) => c - TILE[best][i])) ? k : best);
+    const read = got.colours.map(nearest).join('');
+    check('ステッカーの無いキューブ: ずれて傾いていても見つけて読む',
+          read === FACE.join('') && got.score >= LiveView.TAKE_MIN, `${read} score=${got.score.toFixed(0)}`);
+    const head = picture((x, y) => {
+      const hair = ((x - 120) / 62) ** 2 + ((y - 80) / 56) ** 2 < 1 && y < 82;
+      const skin = ((x - 120) / 50) ** 2 + ((y - 118) / 62) ** 2 < 1;
+      const shirt = y > 170;
+      return hair ? [28, 24, 22] : skin ? [210, 158, 128] : shirt ? [40, 44, 58] : null;
+    });
+    const none = Scan.sampleImage(head, LiveView.guide);
+    check('ステッカーの無いキューブ: キューブの無い顔だけの映像は見つけない',
+          none.score < LiveView.GRID_MIN, `score=${none.score.toFixed(0)}`);
+  }
 }
 
 console.log(`\n2 フェーズ法: 平均 ${(tpLen / (trials - tpFail)).toFixed(1)} 手 / 最大 ${tpMax} 手 / ` +
