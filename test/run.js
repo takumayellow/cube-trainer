@@ -435,6 +435,23 @@ for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js'
   }
   check('読み取り: 面の順番と向きがばらばらでも元の状態を復元する', readOk === 10, `${readOk}/10`);
 
+  // A player who knows the way turns three planned moves before showing the cube again.
+  let runOk = 0;
+  for (let t = 0; t < 5; t++) {
+    const c = new Cube(); c.scramble(20);
+    const st = c.getState();
+    const r = Reader.create();
+    for (const f of Scan.FACE_ORDER) r.offer(shoot(st, f, 0));
+    const out = r.finish();
+    const tr = Track.create(out.read.state, out.read.palette);
+    const plan = Policy.create(st, { mode: 'shortest' }).plan;
+    tr.setPlan(plan);
+    const now = after(plan.slice(0, 3), st).getState();
+    for (const f of ['F', 'U', 'R']) tr.observe(shoot(now, f, 0));
+    if (Scan.FACE_ORDER.every(f => tr.state[f].join() === now[f].join())) runOk++;
+  }
+  check('追跡: 手順どおり 3 手続けて回してから見せても追える', runOk === 5, `${runOk}/5`);
+
   // U turned while the camera looks at U from... the U face itself is visible: spin.
   const s0 = solved();
   check('矢印: 正面の面の手は回転の矢印', Track.arrowFor('F', 'F', 0, s0).kind === 'spin' || Track.arrowFor('F', 'F', 0, s0).kind === 'show');
