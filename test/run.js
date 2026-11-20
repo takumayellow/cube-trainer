@@ -410,7 +410,7 @@ check('キー: 面以外の文字は回さない', key('x') === null && key('Ent
 check('キー: 押しっぱなしのリピートでは回さない', key('r', { repeat: true }) === null);
 
 // ── 12. カメラで追う ────────────────────────────────────────────────────────
-for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js', 'live/view.js']) {
+for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js', 'live/view.js', 'live/overlay.js']) {
   // eslint-disable-next-line no-eval
   eval(fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8'));
 }
@@ -481,6 +481,15 @@ for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js'
   const lm = Learn.move("R'");
   check("CFOP: 記号の説明（R' = 右の面を反時計回り）", lm.face.includes('右') && lm.amount.includes('反時計'));
   const tr = Learn.track([{ key: 'cross', done: true }, { key: 'f2l', done: false }], 'f2l');
+  {
+    const b0 = { x: 50, y: 50, size: 140 };
+    check('枠: 細かい揺れでは動かない', LiveView.ease(b0, { x: 51, y: 49, size: 141 }) === b0);
+    const e = LiveView.ease(b0, { x: 60, y: 50, size: 140 });
+    check('枠: 少しずれたら一部だけ寄る', e.x > 50 && e.x < 60, JSON.stringify(e));
+    const far = { x: 160, y: 50, size: 100 };
+    check('枠: キューブが大きく動いたらすぐ追う', LiveView.ease(b0, far) === far);
+    check('枠: 最初は読んだ位置に出す', LiveView.ease(null, far) === far);
+  }
   check('CFOP: 段階の表示（済み・いま・これから）',
         tr.map(x => x.state).join() === 'done,now,later,later');
 
@@ -571,6 +580,25 @@ for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js'
     check('ステッカーの無いキューブ: キューブの無い顔だけの映像は見つけない',
           none.score < LiveView.GRID_MIN, `score=${none.score.toFixed(0)}`);
   }
+}
+
+// 矢印の言葉: カメラの反対側に立つ人（鏡像のプレビュー）から見た向きで言う
+{
+  const W = Overlay.turnWords, H = Overlay.wholeWords;
+  // カメラ側が右へ動く上の段 = 上から見て反時計回り。手前（見える側）も本人の右へ動く
+  const r = W({ kind: 'slide', axis: 'row', index: 0, toward: 'right' }, true);
+  check('言葉: 段の向きは見える側の動きと上から見た回転で言う', r.includes('上の段') && r.includes('側が右へ') && r.includes('反時計回り'), r);
+  check('言葉: 段の向きは鏡像でも変わらない', W({ kind: 'slide', axis: 'row', index: 0, toward: 'right' }, false) === r);
+  // カメラ側が上へ動く列 = 本人の側は下へ。画面左端の列（カメラの左）は本人の右
+  const c = W({ kind: 'slide', axis: 'col', index: 0, toward: 'up' }, true);
+  check('言葉: 列はカメラの裏側の動き（上下逆）と本人から見た左右で言う', c.includes('右の列') && c.includes('側が下へ'), c);
+  const c2 = W({ kind: 'slide', axis: 'col', index: 0, toward: 'up', twice: true }, false);
+  check('言葉: カメラと同じ側に立つなら見たまま', c2.includes('左の列') && c2.includes('側が上へ') && c2.includes('180°'), c2);
+  check('言葉: 正面の面の時計回りは、反対側から見ると反時計回り',
+        W({ kind: 'spin', dir: 'cw' }, true).includes('反時計回り') && !W({ kind: 'spin', dir: 'cw' }, false).includes('反時計回り'));
+  check('言葉: キューブ全体（左右）は上から見た回転', H('left', true).includes('上から見て時計回り') && H('right', false).includes('反時計回り'));
+  check('言葉: キューブ全体（上下）は上の面がどちらへ倒れるか',
+        H('up', true).includes('あなたの方') && H('up', false).includes('向こう') && H('down', false).includes('あなたの方'));
 }
 
 console.log(`\n2 フェーズ法: 平均 ${(tpLen / (trials - tpFail)).toFixed(1)} 手 / 最大 ${tpMax} 手 / ` +

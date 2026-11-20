@@ -122,7 +122,81 @@
     const reach = b.s * 0.62;
     const cx = b.x + (arrow.axis === 'col' ? b.s * mid : b.s / 2);
     const cy = b.y + (arrow.axis === 'row' ? b.s * mid : b.s / 2);
-    line(ctx, cx - dx * reach, cy - dy * reach, cx + dx * reach, cy + dy * reach, LAYER, width, heads);
+    // the back of the layer runs the other way: draw it as a belt wrapping round the cube
+    const off = b.s / 3 * 0.42;
+    const [ox, oy] = arrow.axis === 'row' ? [0, -off] : [off, 0];
+    belt(ctx, cx - dx * reach, cy - dy * reach, cx + dx * reach, cy + dy * reach, ox, oy, LAYER, width, heads);
+  }
+
+  /**
+   * A wrap-round arrow: the front run from (x0,y0) to (x1,y1), then a curl over
+   * the edge and a faint dashed return along the far side, offset by (ox,oy).
+   * It shows that the side of the cube facing away travels the opposite way.
+   */
+  function belt(ctx, x0, y0, x1, y1, ox, oy, colour, width, heads) {
+    const len = Math.hypot(x1 - x0, y1 - y0) || 1;
+    const dx = (x1 - x0) / len;
+    const dy = (y1 - y0) / len;
+    const k = Math.hypot(ox, oy) * 1.5;
+    ctx.save();
+    ctx.strokeStyle = colour;
+    ctx.fillStyle = colour;
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = width * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(x1 - dx * width, y1 - dy * width);
+    ctx.bezierCurveTo(x1 + dx * k, y1 + dy * k, x1 + ox + dx * k, y1 + oy + dy * k, x1 + ox, y1 + oy);
+    ctx.stroke();
+    ctx.setLineDash([width * 1.6, width * 1.4]);
+    ctx.beginPath();
+    ctx.moveTo(x1 + ox, y1 + oy);
+    ctx.lineTo(x0 + ox + dx * width * 2, y0 + oy + dy * width * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    head(ctx, x0 + ox, y0 + oy, Math.atan2(-dy, -dx), width * 2.2);
+    ctx.restore();
+    line(ctx, x0, y0, x1, y1, colour, width, heads);
+  }
+
+  const ROT = { true: '時計回り', false: '反時計回り' };
+
+  /**
+   * The turn in words from where the player stands. A mirrored preview means a
+   * webcam facing the player: the player is behind the cube and sees the side
+   * facing away from the camera, which moves the other way to the picture.
+   * Up/down and "seen from above" read the same from both sides, so the words
+   * lean on them. `toward` and `dir` are in camera pixels (not mirrored).
+   */
+  function turnWords(a, mirrored) {
+    const amount = a.twice ? '180°' : '90°';
+    const word = { up: '上', down: '下', left: '左', right: '右' };
+    if (a.kind === 'spin') {
+      const cw = (a.dir === 'cw') !== mirrored;
+      const which = mirrored ? 'カメラに向けた面（あなたの反対側）' : 'カメラに向けた面';
+      return `${which}を、あなたから見て${ROT[cw]}に ${amount} 回してください`;
+    }
+    if (a.kind !== 'slide') return '';
+    if (a.axis === 'row') {
+      const name = ['上', '真ん中', '下'][a.index];
+      // camera side to the camera's right = turning anticlockwise seen from above;
+      // the player's own side then moves to the player's right, either way round
+      return `${name}の段を、あなたから見える側が${word[a.toward]}へ動くように ${amount} 回してください（上から見て${ROT[a.toward === 'left']}）`;
+    }
+    const cols = mirrored ? ['右', '真ん中', '左'] : ['左', '真ん中', '右'];
+    const near = mirrored ? BACK[a.toward] : a.toward;
+    return `${cols[a.index]}の列を、あなたから見える側が${word[near]}へ動くように ${amount} 回してください`;
+  }
+
+  /** Turning the whole cube (`dir` as in `whole`) in the player's words. */
+  function wholeWords(dir, mirrored) {
+    if (dir === 'flip') return 'キューブ全体を上下ひっくり返して、反対側の面をカメラに向けてください';
+    if (dir === 'left' || dir === 'right') {
+      return `キューブ全体を、上から見て${ROT[dir === 'left']}に 90° 回してください`;
+    }
+    // the camera side going up tips the top away from the camera
+    const toPlayer = (dir === 'up') === mirrored;
+    return `キューブ全体を、上の面が${toPlayer ? 'あなたの方' : '向こう（カメラの方）'}へ倒れるように 90° 回してください`;
   }
 
   /**
@@ -153,5 +227,5 @@
     return { up: '上', down: '下', left: '左', right: '右' }[d];
   }
 
-  window.Overlay = { clear, grid, move, whole, sideWord, BACK };
+  window.Overlay = { clear, grid, move, whole, sideWord, turnWords, wholeWords, BACK };
 })();

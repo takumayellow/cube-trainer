@@ -35,9 +35,10 @@
    */
   function hint(count) {
     if (count === 0) return { dir: null, text: 'どの面からでも大丈夫です。面をカメラに向けてください' };
-    if (count <= 3) return { dir: 'left', text: 'キューブ全体を矢印の向きに 90° 回して、隣の面を見せてください' };
-    if (count === 4) return { dir: 'down', text: 'キューブを手前に倒して、上の面を見せてください' };
-    if (count === 5) return { dir: 'flip', text: 'ひっくり返して、残りの面を見せてください' };
+    // `text` is said with the way to turn the cube (Overlay.wholeWords) in front
+    if (count <= 3) return { dir: 'left', text: '隣の面を見せてください' };
+    if (count === 4) return { dir: 'down', text: '上の面を見せてください' };
+    if (count === 5) return { dir: 'flip', text: '残りの面を見せてください' };
     return { dir: null, text: '6 面そろいました' };
   }
 
