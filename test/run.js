@@ -500,12 +500,20 @@ for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js'
   const tr = Learn.track([{ key: 'cross', done: true }, { key: 'f2l', done: false }], 'f2l');
   {
     const b0 = { x: 50, y: 50, size: 140 };
-    check('枠: 細かい揺れでは動かない', LiveView.ease(b0, { x: 51, y: 49, size: 141 }) === b0);
-    const e = LiveView.ease(b0, { x: 60, y: 50, size: 140 });
-    check('枠: 少しずれたら一部だけ寄る', e.x > 50 && e.x < 60, JSON.stringify(e));
+    const at = (prev, box) => LiveView.settle(prev, box);
+    const p0 = at(null, b0);
+    check('枠: 最初は読んだ位置に出す', p0.shown === b0);
+    check('枠: 細かい揺れでは動かない', at(p0, { x: 53, y: 47, size: 143 }).shown === b0);
+    let p = p0;
+    for (let k = 0; k < 3; k++) p = at(p, { x: 70, y: 50, size: 140 });
+    check('枠: ずれが続いたら寄っていく', p.shown.x > 55 && p.shown.x <= 70, JSON.stringify(p.shown));
     const far = { x: 160, y: 50, size: 100 };
-    check('枠: キューブが大きく動いたらすぐ追う', LiveView.ease(b0, far) === far);
-    check('枠: 最初は読んだ位置に出す', LiveView.ease(null, far) === far);
+    check('枠: 1 回だけ遠くに読めても飛ばない', at(p0, far).shown === b0);
+    check('枠: 遠くに 2 回続けて読めたらすぐ追う', at(at(p0, far), { x: 162, y: 51, size: 101 }).shown.x === 162);
+    const stray = { x: 0, y: 160, size: 120 };
+    let q = p0;
+    for (const b of [far, stray, { x: 161, y: 50, size: 100 }]) q = at(q, b);
+    check('枠: 遠い読みの間に外れが挟まっても追う', q.shown.x === 161, JSON.stringify(q.shown));
   }
   check('CFOP: 段階の表示（済み・いま・これから）',
         tr.map(x => x.state).join() === 'done,now,later,later');

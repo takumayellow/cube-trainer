@@ -29,15 +29,59 @@
   const STEADY_D = 0.015;    // largest per-sticker change between agreeing reads
   const GONE_TICKS = 2;      // reads without a face before it counts as gone
   // The square drawn over the cube. The grid search lands on a slightly
-  // different size and place every read even when the cube holds still (about
-  // 7 px a read at SIZE, against 3 px of real hand motion), so the drawn square
-  // eases towards each read instead of jumping to it; a move of more than half
-  // a side is the cube itself moving and is followed at once. Measured on the
-  // hand-held sequences: the square shakes 2..3 px a read instead of 5..10,
-  // and stays as close to the real cube as before.
-  const EASE = 0.35;         // share of the way to the new read each tick
-  const EASE_DEAD = 2;       // px: closer than this, the square stays put
-  const EASE_SNAP = 0.5;     // of a side: farther than this, it jumps
+  // different size and place every read even when the cube holds still, and
+  // now and then on a wrong place altogether for one read. So the square
+  // stays where it is while the median of the last few reads is within
+  // SETTLE_LOCK of a side, and otherwise moves half the way there; a read
+  // more than half a side away is followed only when an earlier far read
+  // agrees (the cube itself moved), never on one stray read; strays in
+  // between do not stop it. Measured on
+  // hand-held sequences with one read in seven landing 25 px off: the square
+  // moves 0.9 px a read instead of 2.1 (8.1 raw), and catches up with a real
+  // move within about four reads.
+  const SETTLE_KEEP = 3;      // reads the median is taken over
+  const SETTLE_LOCK = 0.06;   // of a side: closer than this, the square stays put
+  const SETTLE_SNAP = 0.5;    // of a side: farther than this, a jump
+  const SETTLE_AGREE = 0.15;  // of a side: two far reads this close make a real jump
+  const SETTLE_EASE = 0.5;    // share of the way to the median each read
+  const SETTLE_TURN = 2 * Math.PI / 180;
+
+  const centreOf = b => [b.x + b.size / 2, b.y + b.size / 2, b.size, b.angle || 0];
+  const boxOf = c => {
+    const out = { x: c[0] - c[2] / 2, y: c[1] - c[2] / 2, size: c[2] };
+    return Math.abs(c[3]) > 0.5 * Math.PI / 180 ? { ...out, angle: c[3] } : out;
+  };
+  const apart = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const median = list => {
+    const s = [...list].sort((p, q) => p - q);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+
+  /**
+   * Where to draw the square after a read.
+   * @param {{shown: object, seen: number[][], far?: number[][]}|null} prev what settle returned last time
+   * @param {{x: number, y: number, size: number, angle?: number}} box the latest read
+   * @returns {{shown: object, seen: number[][], far: number[][]}} `shown` is the square to draw;
+   *   `far` holds the recent reads far from it, waiting for a second one to agree
+   */
+  function settle(prev, box) {
+    const c = centreOf(box);
+    if (!prev || !prev.shown) return { shown: box, seen: [c], far: [] };
+    const seen = [...prev.seen, c].slice(-SETTLE_KEEP);
+    const s = centreOf(prev.shown);
+    if (apart(c, s) > SETTLE_SNAP * s[2]) {
+      const mate = (prev.far || []).find(p => apart(c, p) < SETTLE_AGREE * c[2]);
+      if (mate) return { shown: box, seen: [mate, c], far: [] };
+      return { shown: prev.shown, seen, far: [...(prev.far || []), c].slice(-SETTLE_KEEP) };
+    }
+    const far = prev.far || [];
+    const near = seen.filter(p => apart(p, s) <= SETTLE_SNAP * s[2]);
+    const t = [0, 1, 2, 3].map(k => median(near.map(p => p[k])));
+    if (apart(t, s) < SETTLE_LOCK * s[2] && Math.abs(t[2] - s[2]) < SETTLE_LOCK * s[2]
+        && Math.abs(t[3] - s[3]) < SETTLE_TURN) return { shown: prev.shown, seen, far };
+    return { shown: boxOf(s.map((v, k) => v + (t[k] - v) * SETTLE_EASE)), seen, far };
+  }
 
   const dist2 = (p, q) => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
 
@@ -46,22 +90,6 @@
     let worst = 0;
     for (let i = 0; i < 9; i++) worst = Math.max(worst, dist2(Scan.feature(a[i]), Scan.feature(b[i])));
     return worst;
-  }
-
-  /** Where to draw the square, given where it was drawn (or null) and the latest read. */
-  function ease(shown, box) {
-    if (!shown) return box;
-    const cx = shown.x + shown.size / 2, cy = shown.y + shown.size / 2;
-    const nx = box.x + box.size / 2, ny = box.y + box.size / 2;
-    const d = Math.hypot(nx - cx, ny - cy);
-    if (d > EASE_SNAP * shown.size) return box;
-    const turned = Math.abs((box.angle || 0) - (shown.angle || 0)) > 1 * Math.PI / 180;
-    if (d < EASE_DEAD && Math.abs(box.size - shown.size) < EASE_DEAD && !turned) return shown;
-    const mix = (a, b) => a + (b - a) * EASE;
-    const size = mix(shown.size, box.size), x = mix(cx, nx), y = mix(cy, ny);
-    const angle = mix(shown.angle || 0, box.angle || 0);
-    const out = { x: x - size / 2, y: y - size / 2, size };
-    return Math.abs(angle) > 0.5 * Math.PI / 180 ? { ...out, angle } : out;
   }
 
   function average(reads) {
@@ -73,8 +101,9 @@
    * @param {HTMLVideoElement} video
    * @param {{onSteady: Function, onGone: Function, onFrame?: Function}} handlers
    *   onSteady({colours, box, size}) once per steady view; onGone() when the
-   *   face leaves; onFrame({box, score, inView, size, progress}) every read,
-   *   for drawing — progress (0..1) is how close the view is to being taken
+   *   face leaves; onFrame({box, score, inView, held, size, progress}) every read,
+   *   for drawing — held is true for a read that lost the grid while the
+   *   square is still kept where it was — progress (0..1) is how close the view is to being taken
    */
   function create(video, handlers) {
     const canvas = document.createElement('canvas');
@@ -86,7 +115,7 @@
     let recent = [];
     let missing = 0;
     let sent = null;         // colours of the last steady view sent, until the face changes
-    let shown = null;        // the square as last drawn
+    let placed = null;       // what settle() returned last, for drawing the square
 
     function read() {
       const w = video.videoWidth;
@@ -101,11 +130,15 @@
       const got = read();
       if (!got) return;
       const inView = got.score >= GRID_MIN;
-      shown = inView ? ease(shown, got.box) : null;
-      const frame = { box: shown || got.box, score: got.score, inView, size: SIZE, progress: 0 };
+      // A read or two without the grid keeps the square where it was, so it
+      // does not blink off and jump back while the cube is turned in the hand.
+      if (inView) placed = settle(placed, got.box);
+      const frame = { box: placed ? placed.shown : got.box, score: got.score, inView, size: SIZE, progress: 0 };
       if (!inView) {
         missing += 1;
         recent = [];
+        if (missing >= GONE_TICKS) placed = null;
+        frame.held = !!placed;       // still drawn where it was, arrow and all
         if (missing === GONE_TICKS) { sent = null; handlers.onGone(); }
         if (handlers.onFrame) handlers.onFrame(frame);
         return;
@@ -127,11 +160,11 @@
 
     return {
       start() { if (!timer) timer = setInterval(tick, TICK); },
-      stop() { clearInterval(timer); timer = null; recent = []; missing = 0; sent = null; shown = null; },
+      stop() { clearInterval(timer); timer = null; recent = []; missing = 0; sent = null; placed = null; },
       /** Forget the current steady view, so it is reported again once steady. */
       again() { recent = []; sent = null; },
     };
   }
 
-  window.LiveView = { create, farthest, ease, FILL, SIZE, TICK, GRID_MIN, TAKE_MIN, STEADY_NEED, STEADY_D, guide: Scan.frameBox(SIZE, SIZE, FILL) };
+  window.LiveView = { create, farthest, settle, FILL, SIZE, TICK, GRID_MIN, TAKE_MIN, STEADY_NEED, STEADY_D, guide: Scan.frameBox(SIZE, SIZE, FILL) };
 })();
