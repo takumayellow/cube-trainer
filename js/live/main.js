@@ -24,7 +24,7 @@
     jobTitle: $('job-title'), jobGoal: $('job-goal'), jobWhy: $('job-why'), jobName: $('job-name'),
     seq: $('seq'), nowMove: $('now-move'), mvNotation: $('mv-notation'),
     mvFace: $('mv-face'), mvTurn: $('mv-turn'), mvWords: $('mv-words'),
-    trig: $('trig'), stage: $('stage'), bar: $('bar'), barFill: $('bar-fill'), sound: $('sound'),
+    trig: $('trig'), stage: $('stage'), bar: $('bar'), barFill: $('bar-fill'), sound: $('sound'), log: $('log'),
     recap: $('recap'), recapTurns: $('recap-turns'), recapStages: $('recap-stages'), recapMoves: $('recap-moves'),
   };
   $('rule').textContent = Learn.RULE;
@@ -49,7 +49,27 @@
   let log = [];                      // turns seen this solve: {move, stage}
   let taught = new Set();            // CFOP mode: face letters and suffixes already explained
 
+  // What the camera saw and what the page made of it (live/trace.js).
+  const traceAdd = (kind, data) => LiveTrace.add(kind, Object.assign({ phase }, data));
+  function showLog() {
+    const st = LiveTrace.state();
+    ui.log.textContent = st.kind === 'file' ? `ログ: ${st.name} に保存中`
+      : st.kind === 'ask' ? `ログ: ${st.name} への保存を再開`
+      : st.canPick ? 'ログの保存先を選ぶ' : 'ログを書き出す';
+    ui.log.setAttribute('aria-pressed', String(st.kind === 'file'));
+  }
+  LiveTrace.onChange = showLog;
+  ui.log.addEventListener('click', async () => {
+    const st = LiveTrace.state();
+    if (st.kind === 'file' || (st.kind === 'none' && !st.canPick)) { await LiveTrace.flush(); if (st.kind !== 'file') LiveTrace.download(); return; }
+    await LiveTrace.pick();
+    showLog();
+  });
+  showLog();
+  LiveTrace.restore();
+
   const view = LiveView.create(ui.video, { onSteady, onGone, onFrame });
+  traceAdd('load', { version: document.lastModified });
 
   function setNote(kind, text) {
     ui.note.dataset.kind = kind;
@@ -118,6 +138,7 @@
   }
 
   function startReading(fresh, text) {
+    traceAdd('read', { fresh: !!fresh, text: text || '' });
     phase = 'reading';
     ui.chips.hidden = false;
     ui.recap.hidden = true;
@@ -127,7 +148,7 @@
     const h = Reader.hint(reader.count);
     wholeHint = h.dir;
     setNote(fresh ? 'start' : 'plan', text || `面を読み取っています（${reader.count} / 6）`);
-    ui.say.textContent = h.text;
+    ui.say.textContent = h.dir ? `${Overlay.wholeWords(h.dir, mirrored)}（水色の矢印）。${h.text}` : h.text;
     ui.left.textContent = '';
     chips();
     view.again();
@@ -291,15 +312,17 @@
 
   function instruction() {
     if (phase === 'solved') return 'おつかれさまでした。もう一度遊ぶときは「最初から読み直す」を押してください';
-    if (phase === 'checking') return seen ? '水色の矢印の向きにキューブ全体を回して、ほかの面を見せてください' : 'キューブの面をカメラに向けてください';
+    if (phase === 'checking') {
+      if (!seen) return 'キューブの面をカメラに向けてください';
+      const nx = Policy.checkNext(seen.face, seen.quarters, checked);
+      return nx ? `${Overlay.wholeWords(nx.dir, mirrored)}（水色の矢印）。ほかの面を見せてください` : 'ほかの面もカメラに見せてください';
+    }
     const next = policy.plan[0];
     if (!next) return '';
     if (!seen) return 'キューブの面をカメラに向けてください';
     const a = Track.arrowFor(next, seen.face, seen.quarters, tracker.state);
-    const amount = a.twice ? '180°' : '90°';
-    if (a.kind === 'show') return '回す列がカメラから見えません。水色の矢印の向きにキューブ全体を回してください';
-    if (a.kind === 'spin') return `正面の面を、矢印の向きに ${amount} 回してください`;
-    return `光っている列を ${Overlay.sideWord(a.toward, mirrored)} へ ${amount} 回してください`;
+    if (a.kind === 'show') return `回す列がカメラから見えません。${Overlay.wholeWords(Overlay.BACK[a.toward], mirrored)}（水色の矢印）`;
+    return Overlay.turnWords(a, mirrored);
   }
 
   function onSteady(v) {
@@ -307,6 +330,7 @@
     if (phase === 'reading' && !tracker) { offer(v.colours); return; }
     if (phase === 'idle' || !tracker) return;
     const r = tracker.observe(v.colours);
+    traceAdd('view', { face: r.face, quarters: r.quarters, moves: r.moves.slice(), lost: r.lost, rgb: v.colours.map(c => c.map(Math.round)) });
     if (r.lost) {
       lost += 1;
       if (phase === 'reading') { offer(v.colours); return; }
@@ -334,10 +358,12 @@
     }
     policy.saw(r.moves, tracker.state);
     follow();
+    traceAdd('plan', { left: policy.plan.length, next: policy.plan[0] || null, note: policy.note.kind, text: ui.note.textContent, say: ui.say.textContent });
     if (r.moves.length || policy.plan.join(' ') !== before) flashStage(FEEDBACK[policy.note.kind] || '');
   }
 
   function restart(text) {
+    traceAdd('reset', { text: text || '' });
     clearTimeout(idleTimer);
     tracker = null;
     policy = null;

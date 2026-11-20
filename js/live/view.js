@@ -28,6 +28,16 @@
   const STEADY_NEED = 3;     // of them, how many must agree: 0.45 s when nothing shakes
   const STEADY_D = 0.015;    // largest per-sticker change between agreeing reads
   const GONE_TICKS = 2;      // reads without a face before it counts as gone
+  // The square drawn over the cube. The grid search lands on a slightly
+  // different size and place every read even when the cube holds still (about
+  // 7 px a read at SIZE, against 3 px of real hand motion), so the drawn square
+  // eases towards each read instead of jumping to it; a move of more than half
+  // a side is the cube itself moving and is followed at once. Measured on the
+  // hand-held sequences: the square shakes 2..3 px a read instead of 5..10,
+  // and stays as close to the real cube as before.
+  const EASE = 0.35;         // share of the way to the new read each tick
+  const EASE_DEAD = 2;       // px: closer than this, the square stays put
+  const EASE_SNAP = 0.5;     // of a side: farther than this, it jumps
 
   const dist2 = (p, q) => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
 
@@ -36,6 +46,21 @@
     let worst = 0;
     for (let i = 0; i < 9; i++) worst = Math.max(worst, dist2(Scan.feature(a[i]), Scan.feature(b[i])));
     return worst;
+  }
+
+  /** Where to draw the square, given where it was drawn (or null) and the latest read. */
+  function ease(shown, box) {
+    if (!shown) return box;
+    const cx = shown.x + shown.size / 2, cy = shown.y + shown.size / 2;
+    const nx = box.x + box.size / 2, ny = box.y + box.size / 2;
+    const d = Math.hypot(nx - cx, ny - cy);
+    if (d > EASE_SNAP * shown.size) return box;
+    if (d < EASE_DEAD && Math.abs(box.size - shown.size) < EASE_DEAD) return shown;
+    const mix = (a, b) => a + (b - a) * EASE;
+    const size = mix(shown.size, box.size), x = mix(cx, nx), y = mix(cy, ny);
+    const angle = mix(shown.angle || 0, box.angle || 0);
+    const out = { x: x - size / 2, y: y - size / 2, size };
+    return Math.abs(angle) > 0.5 * Math.PI / 180 ? { ...out, angle } : out;
   }
 
   function average(reads) {
@@ -60,6 +85,7 @@
     let recent = [];
     let missing = 0;
     let sent = null;         // colours of the last steady view sent, until the face changes
+    let shown = null;        // the square as last drawn
 
     function read() {
       const w = video.videoWidth;
@@ -74,7 +100,8 @@
       const got = read();
       if (!got) return;
       const inView = got.score >= GRID_MIN;
-      const frame = { box: got.box, score: got.score, inView, size: SIZE, progress: 0 };
+      shown = inView ? ease(shown, got.box) : null;
+      const frame = { box: shown || got.box, score: got.score, inView, size: SIZE, progress: 0 };
       if (!inView) {
         missing += 1;
         recent = [];
@@ -99,11 +126,11 @@
 
     return {
       start() { if (!timer) timer = setInterval(tick, TICK); },
-      stop() { clearInterval(timer); timer = null; recent = []; missing = 0; sent = null; },
+      stop() { clearInterval(timer); timer = null; recent = []; missing = 0; sent = null; shown = null; },
       /** Forget the current steady view, so it is reported again once steady. */
       again() { recent = []; sent = null; },
     };
   }
 
-  window.LiveView = { create, farthest, FILL, SIZE, TICK, GRID_MIN, TAKE_MIN, STEADY_NEED, STEADY_D, guide: Scan.frameBox(SIZE, SIZE, FILL) };
+  window.LiveView = { create, farthest, ease, FILL, SIZE, TICK, GRID_MIN, TAKE_MIN, STEADY_NEED, STEADY_D, guide: Scan.frameBox(SIZE, SIZE, FILL) };
 })();

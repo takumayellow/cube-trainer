@@ -72,16 +72,18 @@
       </div>
       <button type="button" id="again" class="ghost">最初から読み直す</button>
       <button type="button" id="sound" class="ghost" aria-pressed="true">音: オン</button>
+      <button type="button" id="log" class="ghost" aria-pressed="false">ログの保存先を選ぶ</button>
     </div>
     <details class="help">
       <summary>見方</summary>
       <ul>
-        <li><span class="sw layer"></span>黄色の矢印: その列（または正面の面）を矢印の向きに回す。矢じりが 2 つなら 180°。</li>
+        <li><span class="sw layer"></span>黄色の矢印: 光っている列を回す。太い矢印はカメラに向いた側の動き、点線で回り込む細い矢印はその裏側の動きです。迷ったら下の文字の案内（あなたから見た向き）に従ってください。矢じりが 2 つなら 180°。</li>
         <li><span class="sw whole"></span>水色の矢印: キューブ全体を矢印の向きに回して、別の面をカメラに向ける。</li>
         <li>「最短」は矢印だけで最短手順を案内します。「CFOP で覚える」は、矢印に加えて回転記号と CFOP の段階の説明を出し、解きながら覚えられるようにします。</li>
         <li>回せたら映像の縁が緑に、予定と違う手なら赤に光ります（音も鳴ります）。</li>
         <li>違う手を回しても大丈夫です。まずその手を戻すよう案内し、ずれが大きいときはそこからの最短手順に切り替えます。</li>
         <li>キューブが 1 分映らないと、次の人のために最初に戻ります。</li>
+        <li>「ログの保存先を選ぶ」でフォルダを選ぶと、カメラが読んだ内容と案内の記録をそこへ <code>live-日付.jsonl</code> として書き足します（映像そのものは残しません）。選ぶまではこのブラウザの中に取っておき、選んだときにまとめて書きます。</li>
       </ul>
     </details>
   </section>
@@ -104,6 +106,7 @@
 <script src="js/live/reader.js"></script>
 <script src="js/live/policy.js"></script>
 <script src="js/live/learn.js"></script>
+<script src="js/live/trace.js"></script>
 <script src="js/live/main.js"></script>
 </body>
 </html>
