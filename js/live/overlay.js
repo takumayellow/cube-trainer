@@ -25,50 +25,116 @@
   /** The screen direction to draw, in camera pixels: the player's side when `mirrored`. */
   const drawDir = (dir, mirrored) => (mirrored && BACK[dir] ? BACK[dir] : dir);
 
-  function head(ctx, x, y, angle, size) {
+  const SHADE = 'rgba(0,0,0,0.6)';  // rim under every arrow, so it stands out on any sticker
+
+  function headPath(ctx, x, y, angle, size) {
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x - size * Math.cos(angle - 0.5), y - size * Math.sin(angle - 0.5));
     ctx.lineTo(x - size * Math.cos(angle + 0.5), y - size * Math.sin(angle + 0.5));
     ctx.closePath();
+  }
+
+  /** A filled arrow head with a dark rim. */
+  function head(ctx, x, y, angle, size, colour) {
+    ctx.save();
+    ctx.lineJoin = 'round';
+    headPath(ctx, x, y, angle, size);
+    ctx.strokeStyle = SHADE;
+    ctx.lineWidth = Math.max(3, size / 5);
+    ctx.stroke();
+    ctx.fillStyle = colour;
     ctx.fill();
+    ctx.restore();
+  }
+
+  /** Stroke the path `trace` draws twice: a dark rim, then the colour on top. */
+  function stroke(ctx, trace, colour, width) {
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = SHADE;
+    ctx.lineWidth = width + Math.max(3, width * 0.6);
+    trace();
+    ctx.stroke();
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = width;
+    trace();
+    ctx.stroke();
+    ctx.restore();
   }
 
   function line(ctx, x0, y0, x1, y1, colour, width, heads) {
-    ctx.strokeStyle = colour;
-    ctx.fillStyle = colour;
-    ctx.lineWidth = width;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.stroke();
     const angle = Math.atan2(y1 - y0, x1 - x0);
-    head(ctx, x1, y1, angle, width * 3);
+    const size = width * 3;
+    // stop the shaft inside the head, so its round end does not poke out
+    const ex = x1 - Math.cos(angle) * size * 0.6;
+    const ey = y1 - Math.sin(angle) * size * 0.6;
+    stroke(ctx, () => { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); }, colour, width);
+    head(ctx, x1, y1, angle, size, colour);
     if (heads > 1) {
-      const back = width * 3.2;
-      head(ctx, x1 - back * Math.cos(angle), y1 - back * Math.sin(angle), angle, width * 3);
+      const back = size * 0.9;
+      head(ctx, x1 - back * Math.cos(angle), y1 - back * Math.sin(angle), angle, size, colour);
     }
   }
 
   function arc(ctx, cx, cy, r, cw, colour, width, heads) {
-    const span = Math.PI * 1.4;
+    const span = Math.PI * 1.45;
     const start = -Math.PI / 2 - (cw ? span / 2 : -span / 2);
     const end = start + (cw ? span : -span);
-    ctx.strokeStyle = colour;
-    ctx.fillStyle = colour;
-    ctx.lineWidth = width;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, start, end, !cw);
-    ctx.stroke();
+    const size = width * 3;
+    const stop = end - (cw ? 1 : -1) * (size * 0.6) / r;
+    stroke(ctx, () => { ctx.beginPath(); ctx.arc(cx, cy, r, start, stop, !cw); }, colour, width);
     const tangent = end + (cw ? Math.PI / 2 : -Math.PI / 2);
-    head(ctx, cx + r * Math.cos(end), cy + r * Math.sin(end), tangent, width * 3);
+    head(ctx, cx + r * Math.cos(end), cy + r * Math.sin(end), tangent, size, colour);
     if (heads > 1) {
-      const back = end - (cw ? 0.35 : -0.35);
-      head(ctx, cx + r * Math.cos(back), cy + r * Math.sin(back), tangent - (cw ? 0.35 : -0.35), width * 3);
+      const step = (cw ? 1 : -1) * (size * 0.9) / r;
+      head(ctx, cx + r * Math.cos(end - step), cy + r * Math.sin(end - step), tangent - step, size, colour);
     }
   }
+
+  /** A rounded label (such as "180°") centred on (x, y); `mirrored` keeps the text readable on a flipped canvas. */
+  function badge(ctx, x, y, text, colour, px, mirrored) {
+    ctx.save();
+    if (mirrored) { ctx.translate(2 * x, 0); ctx.scale(-1, 1); }
+    ctx.font = `bold ${px}px system-ui, sans-serif`;
+    const w = ctx.measureText(text).width + px * 0.9;
+    const h = px * 1.45;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x - w / 2, y - h / 2, w, h, h / 2);
+    else ctx.rect(x - w / 2, y - h / 2, w, h);
+    ctx.fillStyle = colour;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = SHADE;
+    ctx.stroke();
+    ctx.fillStyle = '#111';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y + px * 0.05);
+    ctx.restore();
+  }
+
+  /** Tint cells of the square: `cells` lists [column, row] pairs (0..2). */
+  function tint(ctx, b, angle, cells, fill, edge) {
+    ctx.save();
+    ctx.translate(b.x + b.s / 2, b.y + b.s / 2);
+    ctx.rotate(angle || 0);
+    ctx.translate(-b.s / 2, -b.s / 2);
+    const u = b.s / 3;
+    ctx.fillStyle = fill;
+    for (const [c, r] of cells) ctx.fillRect(c * u, r * u, u, u);
+    const xs = cells.map(c => c[0]);
+    const ys = cells.map(c => c[1]);
+    const x0 = Math.min(...xs) * u;
+    const y0 = Math.min(...ys) * u;
+    ctx.lineWidth = Math.max(3, b.s / 45);
+    ctx.strokeStyle = edge;
+    ctx.strokeRect(x0, y0, (Math.max(...xs) + 1) * u - x0, (Math.max(...ys) + 1) * u - y0);
+    ctx.restore();
+  }
+
+  const ALL = [0, 1, 2].flatMap(r => [0, 1, 2].map(c => [c, r]));
 
   /** The canvas box of the read square `box`, scaled from `size` pixels. */
   function place(canvas, box, size) {
@@ -114,26 +180,44 @@
     ctx.restore();
   }
 
+  const LAYER_FILL = 'rgba(255,212,59,0.30)';
+  const WHOLE_FILL = 'rgba(77,212,255,0.20)';
+
   /** One layer turn, as Track.arrowFor describes it (kinds 'slide' and 'spin'). */
   function move(canvas, box, size, arrow, mirrored) {
     const ctx = canvas.getContext('2d');
     const b = place(canvas, box, size);
-    const width = Math.max(4, b.s / 28);
+    const width = Math.max(5, b.s / 22);
     const heads = arrow.twice ? 2 : 1;
+    const px = Math.max(13, b.s / 9);
     if (arrow.kind === 'spin') {
-      arc(ctx, b.x + b.s / 2, b.y + b.s / 2, b.s * 0.42, arrow.dir === 'cw', LAYER, width, heads);
+      tint(ctx, b, box.angle, ALL, LAYER_FILL, LAYER);
+      arc(ctx, b.x + b.s / 2, b.y + b.s / 2, b.s * 0.36, arrow.dir === 'cw', LAYER, width, heads);
+      if (arrow.twice) badge(ctx, b.x + b.s / 2, b.y + b.s / 2, '180°', LAYER, px, mirrored);
       return;
     }
     if (arrow.kind !== 'slide') return;
     const [dx, dy] = VEC[drawDir(arrow.toward, mirrored)];
+    const cells = [0, 1, 2].map(k => (arrow.axis === 'row' ? [k, arrow.index] : [arrow.index, k]));
+    tint(ctx, b, box.angle, cells, LAYER_FILL, LAYER);
     const mid = (arrow.index + 0.5) / 3;
     const reach = b.s * 0.62;
     const cx = b.x + (arrow.axis === 'col' ? b.s * mid : b.s / 2);
     const cy = b.y + (arrow.axis === 'row' ? b.s * mid : b.s / 2);
-    // the back of the layer runs the other way: draw it as a belt wrapping round the cube
+    // the back of the layer runs the other way: draw it as a belt wrapping round
+    // the cube, on the outer side of an edge layer so it stays off the stickers
+    // (the middle layer has no outer side; its belt runs beside it)
     const off = b.s / 3 * 0.42;
-    const [ox, oy] = arrow.axis === 'row' ? [0, -off] : [off, 0];
+    const out = arrow.index === 0 ? -1 : 1;
+    const [ox, oy] = arrow.axis === 'row' ? [0, out * off] : [out * off, 0];
+    // tilt the arrow with the cube, so it stays on the tinted layer
+    ctx.save();
+    ctx.translate(b.x + b.s / 2, b.y + b.s / 2);
+    ctx.rotate(box.angle || 0);
+    ctx.translate(-(b.x + b.s / 2), -(b.y + b.s / 2));
     belt(ctx, cx - dx * reach, cy - dy * reach, cx + dx * reach, cy + dy * reach, ox, oy, LAYER, width, heads);
+    if (arrow.twice) badge(ctx, cx - dx * reach * 0.5, cy - dy * reach * 0.5, '180°', LAYER, px, mirrored);
+    ctx.restore();
   }
 
   /**
@@ -162,7 +246,7 @@
     ctx.lineTo(x0 + ox + dx * width * 2, y0 + oy + dy * width * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    head(ctx, x0 + ox, y0 + oy, Math.atan2(-dy, -dx), width * 2.2);
+    head(ctx, x0 + ox, y0 + oy, Math.atan2(-dy, -dx), width * 2.2, colour);
     ctx.restore();
     line(ctx, x0, y0, x1, y1, colour, width, heads);
   }
@@ -214,19 +298,26 @@
   function whole(canvas, box, size, dir, mirrored) {
     const ctx = canvas.getContext('2d');
     const b = place(canvas, box, size);
-    const width = Math.max(5, b.s / 22);
+    const width = Math.max(5, b.s / 24);
     const cx = b.x + b.s / 2;
     const cy = b.y + b.s / 2;
+    tint(ctx, b, box.angle, ALL, WHOLE_FILL, WHOLE);
     if (dir === 'flip') {
       line(ctx, cx - b.s * 0.2, cy - b.s * 0.55, cx - b.s * 0.2, cy + b.s * 0.55, WHOLE, width, 2);
       line(ctx, cx + b.s * 0.2, cy - b.s * 0.55, cx + b.s * 0.2, cy + b.s * 0.55, WHOLE, width, 2);
+      badge(ctx, cx, cy, '180°', WHOLE, Math.max(13, b.s / 9), mirrored);
       return;
     }
     const [dx, dy] = VEC[drawDir(dir, mirrored)];
-    const reach = b.s * 0.75;
-    ctx.globalAlpha = 0.9;
-    line(ctx, cx - dx * reach * 0.6, cy - dy * reach * 0.6, cx + dx * reach, cy + dy * reach, WHOLE, width, 1);
-    ctx.globalAlpha = 1;
+    const reach = b.s * 0.7;
+    // one arrow per row (or column): every piece goes the same way
+    for (const k of [-1, 0, 1]) {
+      const x = cx + (dy ? k * b.s / 3 : 0);
+      const y = cy + (dx ? k * b.s / 3 : 0);
+      const far = k === 0 ? 1.15 : 0.95;
+      line(ctx, x - dx * reach * 0.55, y - dy * reach * 0.55, x + dx * reach * far, y + dy * reach * far,
+           WHOLE, k === 0 ? width * 1.2 : width * 0.8, 1);
+    }
   }
 
   /** Words for a screen direction, as the player sees the preview. */
