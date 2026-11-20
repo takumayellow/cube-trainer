@@ -206,11 +206,18 @@
     const cy = b.y + (arrow.axis === 'row' ? b.s * mid : b.s / 2);
     // the back of the layer runs the other way: draw it as a belt wrapping round
     // the cube, on the outer side of an edge layer so it stays off the stickers
+    // (the middle layer has no outer side; its belt runs beside it)
     const off = b.s / 3 * 0.42;
     const out = arrow.index === 0 ? -1 : 1;
     const [ox, oy] = arrow.axis === 'row' ? [0, out * off] : [out * off, 0];
+    // tilt the arrow with the cube, so it stays on the tinted layer
+    ctx.save();
+    ctx.translate(b.x + b.s / 2, b.y + b.s / 2);
+    ctx.rotate(box.angle || 0);
+    ctx.translate(-(b.x + b.s / 2), -(b.y + b.s / 2));
     belt(ctx, cx - dx * reach, cy - dy * reach, cx + dx * reach, cy + dy * reach, ox, oy, LAYER, width, heads);
     if (arrow.twice) badge(ctx, cx - dx * reach * 0.5, cy - dy * reach * 0.5, '180°', LAYER, px, mirrored);
+    ctx.restore();
   }
 
   /**
