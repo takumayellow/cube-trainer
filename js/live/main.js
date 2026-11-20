@@ -379,7 +379,7 @@
 
   function restart(text) {
     traceAdd('reset', { text: text || '' });
-    clearTimeout(idleTimer);
+    clearTimeout(idleTimer); clearTimeout(againTimer);
     tracker = null;
     policy = null;
     seen = null;
@@ -390,7 +390,7 @@
   }
 
   function onGone() {
-    clearTimeout(idleTimer);
+    clearTimeout(idleTimer); clearTimeout(againTimer);
     if (phase !== 'idle' && (tracker || reader.count)) {
       idleTimer = setTimeout(() => restart('次の方どうぞ。キューブの面をカメラに見せてください'), IDLE_RESET_MS);
     }
@@ -461,7 +461,7 @@
 
   window.addEventListener('pagehide', () => {
     LiveTrace.flush();
-    clearTimeout(idleTimer);
+    clearTimeout(idleTimer); clearTimeout(againTimer);
     view.stop();
     stopCamera();
     tracker = null;

@@ -251,6 +251,7 @@
         const top = candidates[0];
         const lost = top.view.cost / 9 > LOST_COST;
         if (lost) {
+          doubt = null;
           return { face: top.view.face, quarters: lastQuarters[top.view.face] || 0, moves: [], lost: true };
         }
         // A turn the plan did not ask for, seen in a single view, may be a
@@ -276,7 +277,7 @@
       },
 
       /** The cube left the camera (no face in view): its turn in the hand may change. */
-      release() { held = null; },
+      release() { held = null; doubt = null; },
 
       /** Start again from a freshly read cube, keeping nothing of the old guesses. */
       reset(newState, newPalette) {
