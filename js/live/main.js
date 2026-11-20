@@ -46,6 +46,7 @@
   let total = 0;                     // solving: length of the plan when it was made
   let lastStage = null;              // steps mode: the stage of the previous job
   let idleTimer = null;
+  let againTimer = null;             // asks the view for one more look at a doubtful face
   let log = [];                      // turns seen this solve: {move, stage}
   let taught = new Set();            // CFOP mode: face letters and suffixes already explained
 
@@ -62,8 +63,11 @@
   ui.log.addEventListener('click', async () => {
     const st = LiveTrace.state();
     if (st.kind === 'file' || (st.kind === 'none' && !st.canPick)) { await LiveTrace.flush(); if (st.kind !== 'file') LiveTrace.download(); return; }
-    await LiveTrace.pick();
+    const got = await LiveTrace.pick();
     showLog();
+    if (typeof got === 'string') {
+      ui.log.textContent = 'このフォルダには保存できません。ドキュメントの中の cube-log などを選んでください';
+    }
   });
   showLog();
   LiveTrace.restore();
@@ -156,6 +160,7 @@
 
   function offer(colours, force) {
     const got = reader.offer(colours, force);
+    traceAdd('shot', { kind: got.kind, index: got.index, force: !!force, count: reader.count, rgb: colours.map(c => c.map(Math.round)) });
     // The face just taken, still in view: the player has not turned the cube yet.
     if (got.kind === 'repeat' && got.index === reader.count - 1 && got.index === flash) return;
     doubted = got.kind === 'repeat' ? colours : null;
@@ -184,6 +189,9 @@
     } catch (e) {
       out = { ok: false, retake: reader.count - 1, text: '色の読み取りが合いません。最後の面をもう一度見せてください' };
     }
+    traceAdd('readDone', out.ok
+      ? { ok: true, corrected: out.read.corrected.length, weakest: out.read.weakest, state: out.read.state }
+      : { ok: false, retake: out.retake, corrected: out.corrected == null ? null : out.corrected });
     if (!out.ok) {
       reader.drop(out.retake);
       flash = -1;
@@ -330,7 +338,14 @@
     if (phase === 'reading' && !tracker) { offer(v.colours); return; }
     if (phase === 'idle' || !tracker) return;
     const r = tracker.observe(v.colours);
-    traceAdd('view', { face: r.face, quarters: r.quarters, moves: r.moves.slice(), lost: r.lost, rgb: v.colours.map(c => c.map(Math.round)) });
+    traceAdd('view', { face: r.face, quarters: r.quarters, moves: r.moves.slice(), lost: r.lost, doubt: !!r.doubt, rgb: v.colours.map(c => c.map(Math.round)) });
+    clearTimeout(againTimer);
+    if (r.doubt) {
+      // One view says the player turned something unplanned. Look once more
+      // before believing it; until then the arrows stay as they are.
+      againTimer = setTimeout(() => view.again(), 300);
+      return;
+    }
     if (r.lost) {
       lost += 1;
       if (phase === 'reading') { offer(v.colours); return; }
@@ -364,7 +379,7 @@
 
   function restart(text) {
     traceAdd('reset', { text: text || '' });
-    clearTimeout(idleTimer);
+    clearTimeout(idleTimer); clearTimeout(againTimer);
     tracker = null;
     policy = null;
     seen = null;
@@ -375,7 +390,7 @@
   }
 
   function onGone() {
-    clearTimeout(idleTimer);
+    clearTimeout(idleTimer); clearTimeout(againTimer);
     if (phase !== 'idle' && (tracker || reader.count)) {
       idleTimer = setTimeout(() => restart('次の方どうぞ。キューブの面をカメラに見せてください'), IDLE_RESET_MS);
     }
@@ -446,7 +461,7 @@
 
   window.addEventListener('pagehide', () => {
     LiveTrace.flush();
-    clearTimeout(idleTimer);
+    clearTimeout(idleTimer); clearTimeout(againTimer);
     view.stop();
     stopCamera();
     tracker = null;
