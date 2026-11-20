@@ -31,6 +31,7 @@
   // The face in front stays in front while its layer turns, so a turned view of
   // it is far more often a turn of that layer than the whole cube spun in the hand.
   const SPIN_COST = 4.0;
+  const PLANNED_RUN = 6;      // planned moves in a row the tracker also tries
 
   // ── geometry ──────────────────────────────────────────────────────────────
 
@@ -200,6 +201,21 @@
             if (m2[0] === m[0]) continue;
             const c2 = m === planned[0] && m2 === planned[1] ? PLANNED_COST : MOVE_COST;
             add(apply(s1, [m2]), h.score * DECAY + c1 + c2, [m, m2]);
+          }
+        }
+        // A player who knows the way turns several planned moves before showing the cube again.
+        let s = h.state;
+        for (let k = 0; k < Math.min(planned.length, PLANNED_RUN); k++) {
+          s = apply(s, [planned[k]]);
+          if (k >= 2) add(s, h.score * DECAY + (k + 1) * PLANNED_COST, planned.slice(0, k + 1));
+        }
+        // ... or got the first of them wrong and carried on with the rest.
+        for (const m of MOVES) {
+          if (m === planned[0]) continue;
+          let t = apply(h.state, [m]);
+          for (let k = 1; k < Math.min(planned.length, PLANNED_RUN); k++) {
+            t = apply(t, [planned[k]]);
+            if (k >= 2) add(t, h.score * DECAY + MOVE_COST + k * PLANNED_COST, [m].concat(planned.slice(1, k + 1)));
           }
         }
       }
