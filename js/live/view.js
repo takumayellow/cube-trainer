@@ -55,7 +55,8 @@
     const nx = box.x + box.size / 2, ny = box.y + box.size / 2;
     const d = Math.hypot(nx - cx, ny - cy);
     if (d > EASE_SNAP * shown.size) return box;
-    if (d < EASE_DEAD && Math.abs(box.size - shown.size) < EASE_DEAD) return shown;
+    const turned = Math.abs((box.angle || 0) - (shown.angle || 0)) > 1 * Math.PI / 180;
+    if (d < EASE_DEAD && Math.abs(box.size - shown.size) < EASE_DEAD && !turned) return shown;
     const mix = (a, b) => a + (b - a) * EASE;
     const size = mix(shown.size, box.size), x = mix(cx, nx), y = mix(cy, ny);
     const angle = mix(shown.angle || 0, box.angle || 0);

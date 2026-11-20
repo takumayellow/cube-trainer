@@ -445,6 +445,7 @@
   }
 
   window.addEventListener('pagehide', () => {
+    LiveTrace.flush();
     clearTimeout(idleTimer);
     view.stop();
     stopCamera();

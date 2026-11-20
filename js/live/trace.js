@@ -35,8 +35,9 @@
   const today = () => { const d = new Date(); return `live-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.jsonl`; };
 
   function save() {
-    if (pending.length > KEEP) pending = pending.slice(-KEEP);
-    try { localStorage.setItem(KEY, JSON.stringify(pending)); } catch (e) { /* storage full or blocked */ }
+    // With a folder, everything waits for the next write; without one, keep the latest.
+    if (!folder && pending.length > KEEP) pending = pending.slice(-KEEP);
+    try { localStorage.setItem(KEY, JSON.stringify(pending.slice(-KEEP))); } catch (e) { /* storage full or blocked */ }
   }
 
   function idb(mode, fn) {
@@ -64,23 +65,29 @@
   }
 
   function flush() {
+    clearTimeout(timer);
     timer = null;
     save();
-    if (!folder || !pending.length) return writing;
-    const batch = pending;
+    if (!folder) return writing;
     const dir = folder;
-    writing = writing.then(() => append(dir, batch.map(e => JSON.stringify(e)).join('\n') + '\n'))
-      .then(() => {
-        pending = pending.slice(batch.length);   // entries added meanwhile stay
+    // Writes run one after another; each takes what is waiting when its turn comes,
+    // so nothing is written twice and entries added meanwhile wait for the next one.
+    writing = writing.then(async () => {
+      if (folder !== dir || !pending.length) return;
+      const batch = pending.slice();
+      try {
+        await append(dir, batch.map(e => JSON.stringify(e)).join('\n') + '\n');
+        pending = pending.slice(batch.length);
         save();
-      })
-      .catch(err => {
+      } catch (err) {
         // permission withdrawn or the folder gone: keep the entries, ask again
         stored = dir;
         folder = null;
+        save();
         console.warn('LiveTrace: could not write the log', err);
         onChange();
-      });
+      }
+    });
     return writing;
   }
 
