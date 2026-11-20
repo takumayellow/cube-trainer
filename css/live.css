@@ -94,7 +94,8 @@ body {
 }
 @media (min-width: 900px) {
   .live { grid-template-columns: auto minmax(340px, 1fr); align-items: start; }
-  .live .stage { width: min(calc(100vh - 110px), 60vw); max-width: none; }
+  /* leave the panel its 340px (plus the gap and the page margins) at every width */
+  .live .stage { width: min(calc(100vh - 110px), 60vw, calc(100vw - 400px)); max-width: none; }
 }
 
 .stage {
@@ -285,6 +286,7 @@ button.chip:hover { border-color: var(--fg); }
 @media (prefers-reduced-motion: reduce) {
   .stage.good, .stage.bad { animation-duration: 0.01s; }
   .logo.big i { animation: none; }
+  *, *::before, *::after { transition: none !important; }
 }
 
 /* a mark beside the colour, so the kind of note reads without colour too */
