@@ -510,6 +510,49 @@ for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js'
   check('CFOP: 段階の表示（済み・いま・これから）',
         tr.map(x => x.state).join() === 'done,now,later,later');
 
+  // Reader: the same face under other light is a repeat; a read that needs many
+  // recoloured stickers asks for one face again, but not forever.
+  {
+    const c = new Cube(); c.scramble(20);
+    const r = Reader.create();
+    const faces = Scan.FACE_ORDER.map(f => shoot(c.getState(), f, 0));
+    r.offer(faces[0]);
+    const relit = faces[0].map(p => p.map((v, i) => Math.max(0, Math.min(255, Math.round(v * (i === 2 ? 0.86 : 0.93))))));
+    check('読み取り: 照明が変わっても同じ面は読み取り済み', r.offer(relit).kind === 'repeat');
+    const st = c.getState();
+    // Six faces of which two are the same face: a cube comes out only by recolouring.
+    const bad = Reader.create();
+    [0, 0, 2, 3, 4, 5].forEach(k => bad.offer(faces[k], true));
+    const o1 = bad.finish();
+    check('読み取り: 色を大きく直さないと合わない読み取りは、重なった面を撮り直させる',
+          !o1.ok && (o1.retake === 0 || o1.retake === 1), JSON.stringify(o1).slice(0, 80));
+    bad.drop(o1.retake);
+    bad.offer(faces[1], true);
+    const o2 = bad.finish();
+    check('読み取り: 撮り直した面で正しく読める', o2.ok && o2.read.corrected.length === 0, JSON.stringify(o2.ok && o2.read.corrected));
+    const stubborn = Reader.create();
+    [0, 0, 2, 3, 4, 5].forEach(k => stubborn.offer(faces[k], true));
+    for (let k = 0; k < 2; k++) { const o = stubborn.finish(); stubborn.drop(o.retake); stubborn.offer(faces[0], true); }
+    check('読み取り: 撮り直しは 2 回まで（その後は読めたまま進む）', stubborn.finish().ok);
+  }
+
+  // Track: a turn the plan did not ask for is only taken once a second view agrees.
+  {
+    const c = new Cube(); c.scramble(20);
+    const tr = Track.create(c.getState(), Scan.toStateAnyOrder(Scan.FACE_ORDER.map(f => shoot(c.getState(), f, 0))).palette);
+    tr.setPlan(['U']);
+    tr.observe(shoot(c.getState(), 'F', 0));
+    c.applyMove('R');
+    const v1 = tr.observe(shoot(c.getState(), 'F', 0));
+    check('追跡: 予定外の手は 1 枚では確定しない', v1.doubt === true && v1.moves.length === 0, JSON.stringify(v1));
+    const v2 = tr.observe(shoot(c.getState(), 'F', 0));
+    check('追跡: 2 枚目も同じなら確定する', !v2.doubt && v2.moves.join(' ') === 'R'
+          && JSON.stringify(tr.state) === JSON.stringify(c.getState()), JSON.stringify(v2));
+    c.applyMove('U');
+    const v3 = tr.observe(shoot(c.getState(), 'F', 0));
+    check('追跡: 予定どおりの手はすぐ確定する', !v3.doubt && v3.moves.join(' ') === 'U', JSON.stringify(v3));
+  }
+
   // LiveView: a face is taken once 3 of the last 4 clear reads agree, even
   // when one of them shakes, and the same view is not taken twice.
   {

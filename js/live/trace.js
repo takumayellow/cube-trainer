@@ -104,7 +104,12 @@
     return flush();
   }
 
-  /** Ask for a folder (needs a click). Resolves false when the player cancels. */
+  /**
+   * Ask for a folder (needs a click). Resolves true when writing to it, false
+   * when the player cancels, or the browser's reason when it refuses (Chrome
+   * will not hand out Desktop, Documents or Downloads themselves, only a
+   * folder inside them).
+   */
   async function pick() {
     if (stored) {
       try {
@@ -116,7 +121,9 @@
       await use(await window.showDirectoryPicker({ id: 'cube-trainer-log', mode: 'readwrite' }));
       return true;
     } catch (e) {
-      return false;                  // cancelled
+      if (e && e.name === 'AbortError') return false;   // cancelled
+      console.warn('LiveTrace: could not use the folder', e);
+      return (e && e.message) || String(e);
     }
   }
 

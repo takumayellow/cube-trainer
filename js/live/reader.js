@@ -16,6 +16,24 @@
   // brightness off by 8% stays under 0.009; two different faces, even a red and
   // an orange face of a solved cube, stay above 0.017.
   const DUP_D = 0.012;
+  // Under the club's lights, a face shown again came 0.013 and 0.016 away, with
+  // its centre sticker 0.050 and 0.002 away. The only two different faces of
+  // the photo fixtures closer than NEAR_D (0.017) had centres 0.136 apart, so a
+  // view also counts as a repeat when it is this close and so is its centre.
+  const NEAR_D = 0.03;
+  const CENTRE_D = 0.1;
+  // Stickers the read may recolour to make a real cube. A good read of the
+  // photo fixtures needs 0 to 2; the two reads that went wrong at the club
+  // needed 11 and 16 (a face taken twice under different light, a washed-out
+  // face). Past this, one face is shown again instead.
+  const MAX_CORRECTED = 4;
+  // After this many faces shown again in a row, the read is taken as it is,
+  // so a cube that really is hard to see does not keep the player waiting.
+  const MAX_REJECTS = 2;
+  // When a read is turned down, two shots closer than this are taken for one
+  // face shown twice. Different faces of the photo fixtures stay above 0.017
+  // but a few come within 0.05; the club's twice-shown faces were 0.013-0.021.
+  const TWIN_D = 0.03;
   const dist2 = (p, q) => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
   const meanDist = (a, b) => {
     let sum = 0;
@@ -44,12 +62,15 @@
 
   function create() {
     let shots = [];          // {colours, centre}
+    let rejects = 0;         // reads turned down in a row for needing too many corrections
 
     /** Index of the taken face this view repeats, or -1. */
     function repeatOf(colours) {
       for (let k = 0; k < shots.length; k++) {
         for (let q = 0; q < 4; q++) {
-          if (meanDist(turnNine(colours, q), shots[k].colours) < DUP_D) return k;
+          const d = meanDist(turnNine(colours, q), shots[k].colours);
+          if (d < DUP_D) return k;
+          if (d < NEAR_D && dist2(Scan.feature(colours[4]), Scan.feature(shots[k].colours[4])) < CENTRE_D) return k;
         }
       }
       return -1;
@@ -77,7 +98,7 @@
         shots = shots.filter((_, k) => k !== index);
       },
 
-      clear() { shots = []; },
+      clear() { shots = []; rejects = 0; },
 
       /**
        * Work out the cube from six faces.
@@ -89,12 +110,33 @@
         const read = Scan.toStateAnyOrder(shots.map(s => s.colours));
         let solvable = false;
         try { solvable = !!TwoPhaseSolver.solve(read.state, { budgetMs: 300 }); } catch (e) { solvable = false; }
-        if (solvable) return { ok: true, read };
+        if (solvable && (read.corrected.length <= MAX_CORRECTED || rejects >= MAX_REJECTS)) {
+          rejects = 0;
+          return { ok: true, read };
+        }
+        if (solvable) {
+          // A cube came out, but only by recolouring many stickers: retake the face
+          // that needed most of them (the weakest one when it is a tie).
+          rejects += 1;
+          // Two shots this alike are most likely one face shown twice: take the later again.
+          let pair = null;
+          for (let i = 0; i < shots.length; i++) {
+            for (let j = i + 1; j < shots.length; j++) {
+              const d = Math.min(...[0, 1, 2, 3].map(q => meanDist(turnNine(shots[j].colours, q), shots[i].colours)));
+              if (d < TWIN_D && (!pair || d < pair.d)) pair = { d, later: j };
+            }
+          }
+          const per = read.placement.map(p => read.corrected.filter(c => c.face === p.face).length
+            + (p.face === read.weakest ? 0.5 : 0));
+          const retake = pair ? pair.later : per.indexOf(Math.max(...per));
+          return { ok: false, retake, corrected: read.corrected.length,
+                   text: '読み取りのあやしい面を 1 つ外しました。チップに無い面を見せてください' };
+        }
         const retake = Math.max(0, read.placement.findIndex(p => p.face === read.weakest));
         return { ok: false, retake, text: '色の読み取りが合いません。光るチップの面を、もう一度見せてください' };
       },
     };
   }
 
-  window.Reader = { create, hint, DUP_D };
+  window.Reader = { create, hint, DUP_D, MAX_CORRECTED };
 })();

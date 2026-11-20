@@ -183,6 +183,7 @@
     let lastQuarters = {};
     let held = null;
     let plan = [];
+    let doubt = null;          // key of an unplanned guess waiting for a second view
 
     function expand(planned) {
       const out = new Map();
@@ -234,7 +235,9 @@
        * @returns {{face: string, quarters: number, moves: string[], lost: boolean}}
        *   `moves` is what the player turned since the last view, as best the
        *   tracker can tell; `lost` means nothing near the believed cube looks
-       *   like this, and the player should show the cube's faces again.
+       *   like this, and the player should show the cube's faces again;
+       *   `doubt` means the view needs turns the plan did not ask for, so nothing
+       *   is taken from it until a second view agrees.
        */
       observe(rgb9) {
         const costs = viewCosts(rgb9, palette);
@@ -250,6 +253,15 @@
         if (lost) {
           return { face: top.view.face, quarters: lastQuarters[top.view.face] || 0, moves: [], lost: true };
         }
+        // A turn the plan did not ask for, seen in a single view, may be a
+        // washed-out or half-turned view rather than a turn: keep it in doubt,
+        // change nothing, and take it only if the next view agrees.
+        const planned = top.moves.every((m, k) => m === plan[k]);
+        if (!planned && doubt !== top.key) {
+          doubt = top.key;
+          return { face: top.view.face, quarters: top.view.quarters, moves: [], lost: false, doubt: true };
+        }
+        doubt = null;
         const face = top.view.face;
         // A face of one colour fits every turn equally; keep the turn we last saw.
         const uniform = top.state[face].every(c => c === top.state[face][0]);
@@ -272,6 +284,7 @@
         lastQuarters = {};
         held = null;
         plan = [];
+        doubt = null;
       },
     };
   }
