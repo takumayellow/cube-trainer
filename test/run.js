@@ -510,6 +510,10 @@ for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js'
     const far = { x: 160, y: 50, size: 100 };
     check('枠: 1 回だけ遠くに読めても飛ばない', at(p0, far).shown === b0);
     check('枠: 遠くに 2 回続けて読めたらすぐ追う', at(at(p0, far), { x: 162, y: 51, size: 101 }).shown.x === 162);
+    const stray = { x: 0, y: 160, size: 120 };
+    let q = p0;
+    for (const b of [far, stray, { x: 161, y: 50, size: 100 }]) q = at(q, b);
+    check('枠: 遠い読みの間に外れが挟まっても追う', q.shown.x === 161, JSON.stringify(q.shown));
   }
   check('CFOP: 段階の表示（済み・いま・これから）',
         tr.map(x => x.state).join() === 'done,now,later,later');
