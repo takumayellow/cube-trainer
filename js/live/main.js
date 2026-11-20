@@ -37,7 +37,7 @@
   let policy = null;
   let mode = 'shortest';
   let lost = 0;
-  let frame = null;                  // latest {box, inView, size}
+  let frame = null;                  // latest {box, inView, held, size}
   let seen = null;                   // latest face the tracker placed: {face, quarters}
   let wholeHint = null;              // reading: which way to turn the cube next
   let flash = -1;                    // reading: chip to highlight
@@ -409,7 +409,7 @@
     const c = ui.overlay;
     Overlay.clear(c);
     if (!frame) return;
-    if (!frame.inView) {
+    if (!frame.inView && !frame.held) {
       Overlay.grid(c, LiveView.guide, frame.size, 'idle');
       return;
     }
