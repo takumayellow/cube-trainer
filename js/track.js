@@ -237,7 +237,7 @@
        *   tracker can tell; `lost` means nothing near the believed cube looks
        *   like this, and the player should show the cube's faces again;
        *   `doubt` means the view needs turns the plan did not ask for, so nothing
-       *   is taken from it until a second view agrees.
+       *   is taken from it and the next view decides.
        */
       observe(rgb9) {
         const costs = viewCosts(rgb9, palette);
@@ -254,10 +254,11 @@
           return { face: top.view.face, quarters: lastQuarters[top.view.face] || 0, moves: [], lost: true };
         }
         // A turn the plan did not ask for, seen in a single view, may be a
-        // washed-out or half-turned view rather than a turn: keep it in doubt,
-        // change nothing, and take it only if the next view agrees.
+        // washed-out or half-turned view rather than a turn: change nothing and
+        // look once more. Only one view in a row is held back, so a player who
+        // keeps turning is never left behind.
         const planned = top.moves.every((m, k) => m === plan[k]);
-        if (!planned && doubt !== top.key) {
+        if (!planned && doubt === null) {
           doubt = top.key;
           return { face: top.view.face, quarters: top.view.quarters, moves: [], lost: false, doubt: true };
         }
