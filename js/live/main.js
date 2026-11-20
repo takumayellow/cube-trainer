@@ -11,7 +11,7 @@
 'use strict';
 
 (function () {
-  const LOST_LIMIT = 3;              // views nobody can explain before reading again
+  const LOST_LIMIT = 8;              // views in a row nobody can explain before reading again
   // No cube in view this long: the player has left, so the next one starts
   // from the beginning rather than in the middle of someone else's solve.
   const IDLE_RESET_MS = 60000;
