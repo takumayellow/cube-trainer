@@ -33,8 +33,9 @@
   // now and then on a wrong place altogether for one read. So the square
   // stays where it is while the median of the last few reads is within
   // SETTLE_LOCK of a side, and otherwise moves half the way there; a read
-  // more than half a side away is followed only when the read before it
-  // agrees (the cube itself moved), never on one stray read. Measured on
+  // more than half a side away is followed only when an earlier far read
+  // agrees (the cube itself moved), never on one stray read; strays in
+  // between do not stop it. Measured on
   // hand-held sequences with one read in seven landing 25 px off: the square
   // moves 0.9 px a read instead of 2.1 (8.1 raw), and catches up with a real
   // move within about four reads.
@@ -51,29 +52,35 @@
     return Math.abs(c[3]) > 0.5 * Math.PI / 180 ? { ...out, angle: c[3] } : out;
   };
   const apart = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-  const median = list => { const s = [...list].sort((p, q) => p - q); return s[s.length >> 1]; };
+  const median = list => {
+    const s = [...list].sort((p, q) => p - q);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
 
   /**
    * Where to draw the square after a read.
-   * @param {{shown: object, seen: number[][]}|null} prev what settle returned last time
+   * @param {{shown: object, seen: number[][], far?: number[][]}|null} prev what settle returned last time
    * @param {{x: number, y: number, size: number, angle?: number}} box the latest read
-   * @returns {{shown: object, seen: number[][]}} `shown` is the square to draw
+   * @returns {{shown: object, seen: number[][], far: number[][]}} `shown` is the square to draw;
+   *   `far` holds the recent reads far from it, waiting for a second one to agree
    */
   function settle(prev, box) {
     const c = centreOf(box);
-    if (!prev || !prev.shown) return { shown: box, seen: [c] };
+    if (!prev || !prev.shown) return { shown: box, seen: [c], far: [] };
     const seen = [...prev.seen, c].slice(-SETTLE_KEEP);
     const s = centreOf(prev.shown);
     if (apart(c, s) > SETTLE_SNAP * s[2]) {
-      const last = prev.seen[prev.seen.length - 1];
-      if (last && apart(c, last) < SETTLE_AGREE * c[2]) return { shown: box, seen: [last, c] };
-      return { shown: prev.shown, seen };
+      const mate = (prev.far || []).find(p => apart(c, p) < SETTLE_AGREE * c[2]);
+      if (mate) return { shown: box, seen: [mate, c], far: [] };
+      return { shown: prev.shown, seen, far: [...(prev.far || []), c].slice(-SETTLE_KEEP) };
     }
+    const far = prev.far || [];
     const near = seen.filter(p => apart(p, s) <= SETTLE_SNAP * s[2]);
     const t = [0, 1, 2, 3].map(k => median(near.map(p => p[k])));
     if (apart(t, s) < SETTLE_LOCK * s[2] && Math.abs(t[2] - s[2]) < SETTLE_LOCK * s[2]
-        && Math.abs(t[3] - s[3]) < SETTLE_TURN) return { shown: prev.shown, seen };
-    return { shown: boxOf(s.map((v, k) => v + (t[k] - v) * SETTLE_EASE)), seen };
+        && Math.abs(t[3] - s[3]) < SETTLE_TURN) return { shown: prev.shown, seen, far };
+    return { shown: boxOf(s.map((v, k) => v + (t[k] - v) * SETTLE_EASE)), seen, far };
   }
 
   const dist2 = (p, q) => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
