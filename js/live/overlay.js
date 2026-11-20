@@ -5,6 +5,11 @@
  * scaled to the overlay canvas. The overlay is mirrored together with the
  * video when the preview is, so arrows always sit on the picture they belong
  * to; words about directions are worked out separately (see `sideWord`).
+ *
+ * A mirrored preview means a webcam facing the player, who holds the cube
+ * between themself and the camera and sees the side facing away from it. Every
+ * straight arrow then shows how the player's own side moves — the opposite of
+ * the side the camera sees — so the arrow, the words and the hands agree.
  */
 'use strict';
 
@@ -16,6 +21,9 @@
 
   const VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
   const BACK = { up: 'down', down: 'up', left: 'right', right: 'left' };
+
+  /** The screen direction to draw, in camera pixels: the player's side when `mirrored`. */
+  const drawDir = (dir, mirrored) => (mirrored && BACK[dir] ? BACK[dir] : dir);
 
   function head(ctx, x, y, angle, size) {
     ctx.beginPath();
@@ -107,7 +115,7 @@
   }
 
   /** One layer turn, as Track.arrowFor describes it (kinds 'slide' and 'spin'). */
-  function move(canvas, box, size, arrow) {
+  function move(canvas, box, size, arrow, mirrored) {
     const ctx = canvas.getContext('2d');
     const b = place(canvas, box, size);
     const width = Math.max(4, b.s / 28);
@@ -117,7 +125,7 @@
       return;
     }
     if (arrow.kind !== 'slide') return;
-    const [dx, dy] = VEC[arrow.toward];
+    const [dx, dy] = VEC[drawDir(arrow.toward, mirrored)];
     const mid = (arrow.index + 0.5) / 3;
     const reach = b.s * 0.62;
     const cx = b.x + (arrow.axis === 'col' ? b.s * mid : b.s / 2);
@@ -203,7 +211,7 @@
    * Turn the whole cube: `dir` is where the front of the cube should travel
    * on screen ('up' | 'down' | 'left' | 'right'), or 'flip' for upside down.
    */
-  function whole(canvas, box, size, dir) {
+  function whole(canvas, box, size, dir, mirrored) {
     const ctx = canvas.getContext('2d');
     const b = place(canvas, box, size);
     const width = Math.max(5, b.s / 22);
@@ -214,7 +222,7 @@
       line(ctx, cx + b.s * 0.2, cy - b.s * 0.55, cx + b.s * 0.2, cy + b.s * 0.55, WHOLE, width, 2);
       return;
     }
-    const [dx, dy] = VEC[dir];
+    const [dx, dy] = VEC[drawDir(dir, mirrored)];
     const reach = b.s * 0.75;
     ctx.globalAlpha = 0.9;
     line(ctx, cx - dx * reach * 0.6, cy - dy * reach * 0.6, cx + dx * reach, cy + dy * reach, WHOLE, width, 1);
@@ -227,5 +235,5 @@
     return { up: '上', down: '下', left: '左', right: '右' }[d];
   }
 
-  window.Overlay = { clear, grid, move, whole, sideWord, turnWords, wholeWords, BACK };
+  window.Overlay = { clear, grid, move, whole, sideWord, turnWords, wholeWords, drawDir, BACK };
 })();

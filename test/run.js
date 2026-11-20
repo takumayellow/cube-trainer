@@ -616,6 +616,18 @@ for (const f of ['track.js', 'live/reader.js', 'live/policy.js', 'live/learn.js'
   check('言葉: キューブ全体（左右）は上から見た回転', H('left', true).includes('上から見て時計回り') && H('right', false).includes('反時計回り'));
   check('言葉: キューブ全体（上下）は上の面がどちらへ倒れるか',
         H('up', true).includes('あなたの方') && H('up', false).includes('向こう') && H('down', false).includes('あなたの方'));
+  // 画面の矢印（鏡像なら左右が反転して映る）が、言葉と同じ向きを指す
+  const onScreen = (dir, m) => Overlay.sideWord(Overlay.drawDir(dir, m), m);
+  let agree = true;
+  for (const m of [true, false]) {
+    for (const toward of ['up', 'down', 'left', 'right']) {
+      const axis = toward === 'up' || toward === 'down' ? 'col' : 'row';
+      const w = W({ kind: 'slide', axis, index: 1, toward }, m);
+      if (!w.includes(`側が${onScreen(toward, m)}へ`)) agree = false;
+    }
+  }
+  check('矢印: 画面の矢印は言葉の「見える側が〜へ」と同じ向き（鏡像でも）', agree);
+  check('矢印: 鏡像ではキューブ全体の矢印も手前の面の動きで描く', Overlay.drawDir('up', true) === 'down' && Overlay.drawDir('flip', true) === 'flip' && Overlay.drawDir('left', false) === 'left');
 }
 
 console.log(`\n2 フェーズ法: 平均 ${(tpLen / (trials - tpFail)).toFixed(1)} 手 / 最大 ${tpMax} 手 / ` +

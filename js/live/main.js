@@ -400,16 +400,16 @@
     }
     const taking = phase === 'reading' ? frame.progress : 0;
     Overlay.grid(c, frame.box, frame.size, taking >= 1 ? 'steady' : 'seen', taking);
-    if (phase === 'reading' && wholeHint) Overlay.whole(c, frame.box, frame.size, wholeHint);
+    if (phase === 'reading' && wholeHint) Overlay.whole(c, frame.box, frame.size, wholeHint, mirrored);
     if (phase === 'checking' && seen) {
       const nx = Policy.checkNext(seen.face, seen.quarters, checked);
-      if (nx) Overlay.whole(c, frame.box, frame.size, nx.dir);
+      if (nx) Overlay.whole(c, frame.box, frame.size, nx.dir, mirrored);
       return;
     }
     if (phase !== 'solving' || !seen || !policy.plan.length) return;
     const a = Track.arrowFor(policy.plan[0], seen.face, seen.quarters, tracker.state);
-    if (a.kind === 'show') Overlay.whole(c, frame.box, frame.size, Overlay.BACK[a.toward]);
-    else Overlay.move(c, frame.box, frame.size, a);
+    if (a.kind === 'show') Overlay.whole(c, frame.box, frame.size, Overlay.BACK[a.toward], mirrored);
+    else Overlay.move(c, frame.box, frame.size, a, mirrored);
   }
 
   // ── controls ──────────────────────────────────────────────────────────────
